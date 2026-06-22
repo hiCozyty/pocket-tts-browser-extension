@@ -401,14 +401,7 @@ export class TTSEngine {
 
   private voiceSignature(voice: WasmWorkerVoiceInput): string {
     if (voice.kind === "preset") return `preset:${voice.voice}:${voice.hfRepo}`;
-    if (voice.kind === "wav") {
-      let hash = 5381;
-      const len = Math.min(voice.wavB64.length, 4096);
-      for (let i = 0; i < len; i++) {
-        hash = ((hash << 5) + hash + voice.wavB64.charCodeAt(i)) & 0x7fffffff;
-      }
-      return `wav:${hash.toString(36)}`;
-    }
+    if (voice.kind === "wav") return `wav:${voice.wavB64.length}`;
     return `emb:${voice.embeddingB64.length}`;
   }
 
