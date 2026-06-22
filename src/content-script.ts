@@ -7,7 +7,7 @@ import type {
   RuntimeConfig,
   WasmWorkerVoiceInput,
 } from "./protocol";
-import { PRESET_VOICES, isPresetVoice } from "./protocol";
+import { isPresetVoice } from "./protocol";
 
 interface SelectionData {
   text: string;
@@ -29,7 +29,6 @@ class FloatingUI {
   private equalizerCanvas!: HTMLCanvasElement;
   private statusBadge!: HTMLElement;
   private hintText!: HTMLElement;
-  private downloadButton!: HTMLButtonElement;
   private progressRing!: HTMLElement;
   private progressRingFill: SVGCircleElement | null = null;
 
@@ -39,7 +38,6 @@ class FloatingUI {
   private engine: TTSEngine | null = null;
   private config: RuntimeConfig | null = null;
   private isPlaying = false;
-  private pcmChunks: Uint8Array[] = [];
   private isVisible = false;
 
   constructor() {
@@ -145,17 +143,6 @@ class FloatingUI {
         background: linear-gradient(135deg, #f87171, #ef4444);
       }
 
-      .ptts-icon-btn[data-variant="download"] {
-        background: rgba(255, 255, 255, 0.08);
-        box-shadow: none;
-        width: 28px;
-        height: 28px;
-      }
-
-      .ptts-icon-btn[data-variant="download"]:hover {
-        background: rgba(255, 255, 255, 0.15);
-      }
-
       .ptts-icon-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
@@ -241,29 +228,6 @@ class FloatingUI {
         font-size: 9px;
         font-weight: 600;
         color: var(--ptts-fg);
-      }
-
-      .ptts-voice-select {
-        appearance: none;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid var(--ptts-border);
-        color: var(--ptts-fg);
-        font-size: 11px;
-        padding: 4px 22px 4px 8px;
-        border-radius: 12px;
-        cursor: pointer;
-        font-family: inherit;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='white'><path d='M4 6l4 4 4-4'/></svg>");
-        background-repeat: no-repeat;
-        background-position: right 4px center;
-        background-size: 10px;
-        max-width: 90px;
-        text-overflow: ellipsis;
-      }
-
-      .ptts-voice-select:focus {
-        outline: none;
-        border-color: var(--ptts-accent-2);
       }
 
       .ptts-tooltip {
@@ -353,30 +317,6 @@ class FloatingUI {
     this.hintText.textContent = "";
     this.statusBadge.appendChild(this.hintText);
 
-    this.downloadButton = document.createElement("button");
-    this.downloadButton.className = "ptts-icon-btn";
-    this.downloadButton.setAttribute("data-variant", "download");
-    this.downloadButton.setAttribute("aria-label", "Download as WAV");
-    this.downloadButton.style.display = "none";
-    this.downloadButton.innerHTML = `
-      <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-        <path d="M8 11.5l4-4h-2.5V3h-3v4.5H4l4 4z"/>
-        <path d="M2 13h12v1H2v-1z"/>
-      </svg>
-    `;
-    this.buttonContainer.appendChild(this.downloadButton);
-
-    const voiceSelect = document.createElement("select");
-    voiceSelect.className = "ptts-voice-select";
-    voiceSelect.setAttribute("aria-label", "Voice");
-    for (const v of PRESET_VOICES) {
-      const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
-      voiceSelect.appendChild(opt);
-    }
-    this.buttonContainer.appendChild(voiceSelect);
-
     root.appendChild(this.buttonContainer);
 
     this.transcribeButton.addEventListener("click", (e) => {
@@ -388,20 +328,6 @@ class FloatingUI {
       e.preventDefault();
       e.stopPropagation();
       this.handleStopClick();
-    });
-    this.downloadButton.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.handleDownloadClick();
-    });
-    voiceSelect.addEventListener("change", () => {
-      void this.saveConfig({ voice: voiceSelect.value });
-    });
-    voiceSelect.addEventListener("mousedown", (e) => {
-      e.stopPropagation();
-    });
-    voiceSelect.addEventListener("click", (e) => {
-      e.stopPropagation();
     });
 
     return root;
@@ -477,33 +403,28 @@ class FloatingUI {
   }
 
   private setMode(mode: "idle" | "loading" | "playing" | "error" | "finished"): void {
-    const root = this.getRoot();
+            const root = this.getRoot();
     if (!root) return;
     root.setAttribute("data-mode", mode);
 
     if (mode === "idle") {
       this.transcribeButton.style.display = "flex";
       this.stopButton.style.display = "none";
-      this.downloadButton.style.display = this.pcmChunks.length > 0 ? "flex" : "none";
       this.hintText.textContent = "";
     } else if (mode === "loading") {
       this.transcribeButton.style.display = "none";
       this.stopButton.style.display = "none";
-      this.downloadButton.style.display = "none";
       this.hintText.textContent = "Loading...";
     } else if (mode === "playing") {
       this.transcribeButton.style.display = "none";
       this.stopButton.style.display = "flex";
-      this.downloadButton.style.display = "none";
     } else if (mode === "finished") {
       this.transcribeButton.style.display = "flex";
       this.stopButton.style.display = "none";
-      this.downloadButton.style.display = this.pcmChunks.length > 0 ? "flex" : "none";
       this.hintText.textContent = "";
     } else if (mode === "error") {
       this.transcribeButton.style.display = "flex";
       this.stopButton.style.display = "none";
-      this.downloadButton.style.display = "none";
     }
   }
 
@@ -520,17 +441,13 @@ class FloatingUI {
 
   setEngine(engine: TTSEngine): void {
     this.engine = engine;
-    engine.setOnChunk((samples) => {
-      const pcm = float32ToPcm16(samples);
-      this.pcmChunks.push(pcm);
-    });
     engine.setOnDone(() => {
-      this.isPlaying = false;
+            this.isPlaying = false;
       this.setMode("finished");
       this.equalizer?.setVisible(false);
     });
     engine.setOnError((msg) => {
-      this.hintText.textContent = msg.length > 30 ? msg.slice(0, 30) + "…" : msg;
+            this.hintText.textContent = msg.length > 30 ? msg.slice(0, 30) + "…" : msg;
       this.isPlaying = false;
       this.setMode("error");
       this.equalizer?.setVisible(false);
@@ -554,7 +471,7 @@ class FloatingUI {
   }
 
   private async handleTranscribeClick(): Promise<void> {
-    if (!this.engine) {
+        if (!this.engine) {
       return;
     }
     if (!this.config) {
@@ -565,7 +482,7 @@ class FloatingUI {
     }
 
     if (this.isPlaying) {
-      this.engine.stop();
+            this.engine.stop();
       this.isPlaying = false;
       this.setMode("idle");
       this.equalizer?.setVisible(false);
@@ -582,8 +499,6 @@ class FloatingUI {
       return;
     }
 
-    this.pcmChunks = [];
-    this.downloadButton.style.display = "none";
     this.setMode("loading");
     this.hintText.textContent = "Loading...";
 
@@ -609,7 +524,7 @@ class FloatingUI {
 
     this.isPlaying = true;
     this.setMode("playing");
-
+    
     try {
       const voiceInput: WasmWorkerVoiceInput = {
         kind: "preset",
@@ -631,8 +546,8 @@ class FloatingUI {
       };
       pollForAnalyser();
 
-      await generationPromise;
-    } catch (err) {
+            await generationPromise;
+          } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Pocket TTS] handleTranscribeClick: failed", msg, err);
       this.hintText.textContent = msg.length > 30 ? msg.slice(0, 30) + "…" : msg;
@@ -650,48 +565,6 @@ class FloatingUI {
     this.equalizer?.setVisible(false);
   }
 
-  private handleDownloadClick(): void {
-    if (this.pcmChunks.length === 0) return;
-    const sampleRate = this.engine?.getAnalyser()?.context.sampleRate ?? 24000;
-    const wav = this.createWavBlob(this.pcmChunks, sampleRate);
-    const url = URL.createObjectURL(wav);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pocket-tts-${Date.now()}.wav`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  private createWavBlob(chunks: Uint8Array[], sampleRate: number): Blob {
-    const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
-    const wav = new Uint8Array(44 + totalLen);
-    const view = new DataView(wav.buffer);
-    const writeString = (offset: number, s: string) => {
-      for (let i = 0; i < s.length; i++) {
-        view.setUint8(offset + i, s.charCodeAt(i));
-      }
-    };
-    writeString(0, "RIFF");
-    view.setUint32(4, 36 + totalLen, true);
-    writeString(8, "WAVE");
-    writeString(12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, "data");
-    view.setUint32(40, totalLen, true);
-    let offset = 44;
-    for (const chunk of chunks) {
-      wav.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return new Blob([wav], { type: "audio/wav" });
-  }
-
   private async saveConfig(patch: Partial<RuntimeConfig>): Promise<void> {
     if (!this.config) return;
     this.config = { ...this.config, ...patch };
@@ -707,10 +580,6 @@ class FloatingUI {
 
   setConfig(config: RuntimeConfig): void {
     this.config = config;
-    const select = this.shadow.querySelector(".ptts-voice-select") as HTMLSelectElement | null;
-    if (select && config.voice) {
-      select.value = config.voice;
-    }
   }
 }
 
@@ -724,18 +593,6 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   hfToken: "",
   voice: "alba",
   useCache: true,
-};
-
-const float32ToPcm16 = (samples: Float32Array): Uint8Array => {
-  const out = new Uint8Array(samples.length * 2);
-  const view = new DataView(out.buffer);
-  for (let i = 0; i < samples.length; i++) {
-    const s = samples[i] ?? 0;
-    const clamped = Math.max(-1, Math.min(1, s));
-    const int16 = clamped < 0 ? Math.round(clamped * 32768) : Math.round(clamped * 32767);
-    view.setInt16(i * 2, int16, true);
-  }
-  return out;
 };
 
 const loadConfig = async (): Promise<RuntimeConfig> => {
@@ -776,7 +633,7 @@ const main = async (): Promise<void> => {
       }
 
       const text = sel.toString().trim();
-      if (text.length < MIN_CHARS) {
+                  if (text.length < MIN_CHARS) {
         ui.hide();
         return;
       }

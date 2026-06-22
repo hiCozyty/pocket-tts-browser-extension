@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { EqualizerVisualizer } from "./equalizer";
 
-const BAR_COUNT = 12;
-
 class FakeAnalyser {
   frequencyBinCount = 32;
   context = { sampleRate: 24000 } as AudioContext;
-  getByteFrequencyData(target: Uint8Array) {
-    for (let i = 0; i < target.length; i++) target[i] = (i * 8) % 256;
+  getByteTimeDomainData(target: Uint8Array) {
+    for (let i = 0; i < target.length; i++) target[i] = 128 + (i % 40 - 20) * 3;
   }
 }
 
@@ -20,16 +18,15 @@ const makeCanvas = (): HTMLCanvasElement => {
       const noop = () => undefined;
       return {
         clearRect: noop,
-        createLinearGradient: () => ({ addColorStop: noop }),
-        fillRect: noop,
-        fillStyle: "",
         beginPath: noop,
         moveTo: noop,
         lineTo: noop,
         quadraticCurveTo: noop,
-        closePath: noop,
-        fill: noop,
-        roundRect: noop,
+        stroke: noop,
+        strokeStyle: "",
+        lineWidth: 0,
+        lineCap: "",
+        lineJoin: "",
       } as unknown as CanvasRenderingContext2D;
     },
   });
@@ -37,12 +34,6 @@ const makeCanvas = (): HTMLCanvasElement => {
 };
 
 describe("EqualizerVisualizer", () => {
-  it("initializes history and peaks with BAR_COUNT zeros", () => {
-    const canvas = makeCanvas();
-    const eq = new EqualizerVisualizer(canvas, new FakeAnalyser() as unknown as AnalyserNode);
-    expect(eq).toBeDefined();
-  });
-
   it("setVisible(true) starts the animation loop", () => {
     const canvas = makeCanvas();
     const eq = new EqualizerVisualizer(canvas, new FakeAnalyser() as unknown as AnalyserNode);
@@ -73,9 +64,5 @@ describe("EqualizerVisualizer", () => {
     const eq = new EqualizerVisualizer(canvas, new FakeAnalyser() as unknown as AnalyserNode);
     eq.setVisible(true);
     expect(() => eq.stop()).not.toThrow();
-  });
-
-  it("BAR_COUNT constant matches default of 12 (sanity check)", () => {
-    expect(BAR_COUNT).toBe(12);
   });
 });

@@ -192,7 +192,7 @@ const fetchEmbedding = async (
 };
 
 const handleInit = async (message: Extract<WasmWorkerRequest, { kind: "init" }>) => {
-  stopRequested = true;
+    stopRequested = true;
   activeStreamToken += 1;
 
   postStatus({
@@ -259,7 +259,7 @@ const handleInit = async (message: Extract<WasmWorkerRequest, { kind: "init" }>)
 const handlePrepareVoice = async (
   message: Extract<WasmWorkerRequest, { kind: "prepare_voice" }>,
 ) => {
-  const readyModel = ensureReadyModel();
+    const readyModel = ensureReadyModel();
   const input: WasmWorkerVoiceInput = message.voice;
 
   if (input.kind === "wav") {
@@ -287,13 +287,14 @@ const handlePrepareVoice = async (
 const handleStartStream = async (
   message: Extract<WasmWorkerRequest, { kind: "start_stream" }>,
 ) => {
-  const readyModel = ensureReadyModel();
+    const readyModel = ensureReadyModel();
 
   stopRequested = false;
   const streamToken = ++activeStreamToken;
 
-  const stream = readyModel.start_stream(message.text);
-  let firstChunkSent = false;
+  
+      const stream = readyModel.start_stream(message.text);
+      let firstChunkSent = false;
   let chunkCount = 0;
 
   while (!stopRequested && streamToken === activeStreamToken) {
@@ -303,25 +304,17 @@ const handleStartStream = async (
 
     const chunk = stream.next_chunk_min_samples(targetSamples);
     if (chunk == null) {
-      break;
+            break;
     }
 
     if (!firstChunkSent) {
       firstChunkSent = true;
-      postEvent({ kind: "stream_first_chunk" });
+                  postEvent({ kind: "stream_first_chunk" });
     }
 
     const stats = stream.last_chunk_stats();
     const computeMs = typeof stats.compute_ms === "number" ? stats.compute_ms : null;
     const mergedChunks = typeof stats.chunks_merged === "number" ? stats.chunks_merged : null;
-
-    const postedAt = Date.now();
-    console.log("[Pocket TTS] worker: chunk", {
-      postedAt,
-      chunkLength: chunk.length,
-      computeMs,
-      mergedChunks,
-    });
 
     postEvent(
       {
@@ -340,10 +333,10 @@ const handleStartStream = async (
   }
 
   if (stopRequested || streamToken !== activeStreamToken) {
-    throw new Error("abort");
+        throw new Error("abort");
   }
 
-  postEvent({ kind: "stream_done" });
+      postEvent({ kind: "stream_done" });
   postOk(message.requestId);
 };
 
@@ -355,7 +348,7 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
   }
 
   if (message.kind === "stop") {
-    stopRequested = true;
+            stopRequested = true;
     activeStreamToken += 1;
     return;
   }
@@ -380,7 +373,7 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
       console.error("[Pocket TTS] worker: handler threw", err);
       if (message.kind === "start_stream") {
         const text = err instanceof Error ? err.message : String(err);
-        postEvent({ kind: "stream_error", error: text });
+                postEvent({ kind: "stream_error", error: text });
       }
       postErr(message.requestId, err);
     }

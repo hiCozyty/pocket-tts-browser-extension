@@ -8,8 +8,7 @@ const log = (() => {
     pre.innerHTML += span;
     pre.scrollTop = pre.scrollHeight;
     if (cls === "err") console.error(text);
-    else console.log(text);
-  };
+    else   };
 })();
 
 const $ = <T extends HTMLElement>(id: string): T => {

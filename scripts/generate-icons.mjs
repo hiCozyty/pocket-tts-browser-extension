@@ -141,7 +141,6 @@ for (const s of [16, 32, 48, 128]) {
 
   const buf = PNG.sync.write(png);
   writeFileSync(join(outDir, `icon-${s}.png`), buf);
-  console.log(`Wrote public/icons/icon-${s}.png`);
-}
+  }
 
 void drawIcon;

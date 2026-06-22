@@ -23,18 +23,13 @@ const spawnWorker = (): Worker => {
 
   w.onmessage = (e: MessageEvent<WasmWorkerEvent>) => {
     const ev = e.data;
-    let eventToSend: WasmWorkerEvent = ev;
+            let eventToSend: WasmWorkerEvent = ev;
     if (ev && typeof ev === "object" && "kind" in ev && ev.kind === "stream_chunk") {
       const chunk = ev.chunk as Float32Array;
-      const receivedAt = Date.now();
       eventToSend = { ...ev, chunk: serializeFloat32Array(chunk) } as WasmWorkerEvent;
-      console.log("[Pocket TTS] offscreen: chunk", {
-        receivedAt,
-        serializedAt: Date.now(),
-        chunkLength: chunk.length,
-      });
-    }
+          }
     if (activePortId == null) {
+      console.warn("[Pocket TTS] offscreen: dropping worker event, no activePortId", { eventKind: ev.kind });
       return;
     }
     const payload: WorkerEvent = { kind: "worker_event", portId: activePortId, event: eventToSend };
@@ -48,6 +43,7 @@ const spawnWorker = (): Worker => {
   };
 
   w.onerror = (e: ErrorEvent) => {
+    console.error("[Pocket TTS] offscreen: worker onerror", { activePortId, message: e.message });
     const details = {
       message: e.message,
       filename: e.filename,
@@ -87,8 +83,10 @@ chrome.runtime.onMessage.addListener((message: WasmRequest, _sender, _sendRespon
     return false;
   }
 
+  const prevPortId = activePortId;
   activePortId = message.portId;
-  try {
+  const msgKind = message.msg && typeof message.msg === "object" && "kind" in message.msg ? (message.msg as { kind: string }).kind : "unknown";
+      try {
     ensureWorker().postMessage(message.msg);
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);

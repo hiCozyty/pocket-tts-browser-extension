@@ -69,7 +69,7 @@ const getOffscreenReady = (): Promise<void> => {
 chrome.runtime.onMessage.addListener((message: IncomingMessage) => {
   if (!message || typeof message !== "object") return;
   if (message.kind === "offscreen_ready") {
-    offscreenReadyReceived = true;
+            offscreenReadyReceived = true;
     offscreenReadyResolver?.();
     offscreenReadyResolver = null;
     return;
@@ -82,19 +82,16 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage) => {
     return;
   }
 
+  const evKind = message.kind === "worker_event" && message.event && typeof message.event === "object" && "kind" in message.event
+    ? (message.event as { kind: string }).kind
+    : message.kind;
+  
   if (message.kind === "worker_event") {
     const ev = message.event;
     if (ev && typeof ev === "object" && "kind" in ev && ev.kind === "stream_chunk") {
-      const chunk = (ev as { chunk?: { length?: number } }).chunk;
-      const receivedAt = Date.now();
       try {
         port.postMessage(ev);
-        console.log("[Pocket TTS] bg: chunk", {
-          receivedAt,
-          forwardedAt: Date.now(),
-          chunkLength: chunk?.length,
-        });
-      } catch (err) {
+              } catch (err) {
         const m = err instanceof Error ? err.message : String(err);
         console.error("[Pocket TTS] bg: port.postMessage failed", m);
       }
@@ -118,19 +115,21 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== PORT_NAME) return;
 
   const portId = nextPortId++;
-  ports.set(portId, port);
-
+    ports.set(portId, port);
+  
   const sendToOffscreen = (msg: unknown) => {
-    chrome.runtime.sendMessage({ kind: "wasm_request", portId, msg }).catch((err) => {
+    const msgKind = msg && typeof msg === "object" && "kind" in msg ? (msg as { kind: string }).kind : "unknown";
+        chrome.runtime.sendMessage({ kind: "wasm_request", portId, msg }).catch((err) => {
       const m = err instanceof Error ? err.message : String(err);
       console.error("[Pocket TTS] bg: sendMessage to offscreen failed", m);
     });
   };
 
   port.onMessage.addListener((msg) => {
-    getOffscreenReady()
+    const msgKind = msg && typeof msg === "object" && "kind" in msg ? (msg as { kind: string }).kind : "unknown";
+            getOffscreenReady()
       .then(() => {
-        sendToOffscreen(msg);
+                sendToOffscreen(msg);
       })
       .catch((err) => {
         const m = err instanceof Error ? err.message : String(err);
@@ -142,7 +141,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 
   port.onDisconnect.addListener(() => {
-    ports.delete(portId);
+            ports.delete(portId);
   });
 
   getOffscreenReady().catch((err) => {

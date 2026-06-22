@@ -26,7 +26,7 @@ const WORKLET_CODE = `
 class PCMProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    this.queue = [];
+        this.queue = [];
     this.queueOffset = 0;
     this.hasStarted = false;
     this.isBuffering = true;
@@ -34,6 +34,7 @@ class PCMProcessor extends AudioWorkletProcessor {
     this.firstAudioSent = false;
     this.tick = 0;
     this.underruns = 0;
+    this.processCallCount = 0;
 
     const startThreshold = options && options.processorOptions ? options.processorOptions.startThreshold : undefined;
     const resumeThreshold = options && options.processorOptions ? options.processorOptions.resumeThreshold : undefined;
@@ -90,6 +91,9 @@ class PCMProcessor extends AudioWorkletProcessor {
   }
 
   process(_inputs, outputs) {
+    this.processCallCount += 1;
+    if (this.processCallCount === 1) {
+          }
     const output = outputs[0];
     if (!output || output.length === 0) {
       return true;
@@ -115,13 +119,14 @@ class PCMProcessor extends AudioWorkletProcessor {
           this.port.postMessage({ type: 'state', state: 'buffering' });
         }
         if (this.ended && buffered === 0) {
-          return false;
+                    this.port.postMessage({ type: 'drained' });
+                    return false;
         }
         return true;
       }
       this.hasStarted = true;
       this.isBuffering = false;
-      this.port.postMessage({ type: 'state', state: 'playing' });
+            this.port.postMessage({ type: 'state', state: 'playing' });
     }
 
     let idx = 0;
@@ -132,13 +137,7 @@ class PCMProcessor extends AudioWorkletProcessor {
           this.isBuffering = true;
           this.underruns += 1;
           const msSinceLastChunk = this.lastChunkAt ? (Date.now() - this.lastChunkAt) : 0;
-          console.log('[Pocket TTS] worklet: underrun', {
-            count: this.underruns,
-            buffered: this.bufferedSamples(),
-            msSinceLastChunk,
-            chunksReceived: this.chunksReceived,
-          });
-          this.port.postMessage({ type: 'underrun', count: this.underruns });
+                    this.port.postMessage({ type: 'underrun', count: this.underruns });
           this.port.postMessage({ type: 'state', state: 'buffering' });
         }
         break;
@@ -159,22 +158,22 @@ class PCMProcessor extends AudioWorkletProcessor {
 
     if (idx === channel.length && this.isBuffering && this.bufferedSamples() >= this.resumeThreshold) {
       this.isBuffering = false;
-      console.log('[Pocket TTS] worklet: resume', { buffered: this.bufferedSamples(), resumeThreshold: this.resumeThreshold });
-      this.port.postMessage({ type: 'state', state: 'playing' });
+            this.port.postMessage({ type: 'state', state: 'playing' });
     }
 
     if (!this.firstAudioSent) {
       for (let i = 0; i < channel.length; i++) {
         if (Math.abs(channel[i]) > 1e-5) {
           this.firstAudioSent = true;
-          this.port.postMessage({ type: 'first_audio' });
+                    this.port.postMessage({ type: 'first_audio' });
           break;
         }
       }
     }
 
     if (this.ended && this.bufferedSamples() === 0) {
-      return false;
+            this.port.postMessage({ type: 'drained' });
+            return false;
     }
 
     return true;
@@ -278,6 +277,8 @@ export class TTSEngine {
   private rebufferCount = 0;
   private streamStartAt: number | null = null;
   private firstAudioAt: number | null = null;
+  private samplesFed = 0;
+  private chunksReceived = 0;
 
   private readonly pending = new Map<
     number,
@@ -355,7 +356,9 @@ export class TTSEngine {
   }
 
   async ensureReady(): Promise<void> {
-    if (this.ready) return;
+    if (this.ready) {
+            return;
+    }
     if (!this.config) {
       throw new Error("Engine not configured");
     }
@@ -389,8 +392,10 @@ export class TTSEngine {
   async prepareVoice(voice: WasmWorkerVoiceInput): Promise<void> {
     await this.ensureReady();
     const sig = this.voiceSignature(voice);
-    if (sig === this.preparedVoice) return;
-    await this.sendRpc({ kind: "prepare_voice", voice });
+    if (sig === this.preparedVoice) {
+            return;
+    }
+        await this.sendRpc({ kind: "prepare_voice", voice });
     this.preparedVoice = sig;
   }
 
@@ -405,10 +410,11 @@ export class TTSEngine {
       throw new Error("Web Audio API not available");
     }
 
+    
     if (this.audioCtx && this.workletNode && this.analyser) {
-      if (this.audioCtx.state === "suspended") {
-        await this.audioCtx.resume();
-      }
+                  if (this.audioCtx.state === "suspended") {
+                        await this.audioCtx.resume();
+              }
       return { sampleRate: this.sampleRate };
     }
 
@@ -423,22 +429,22 @@ export class TTSEngine {
     }
 
     if (!this.audioCtx) {
-      this.audioCtx = new AudioContext({ sampleRate: desiredRate });
-      const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
+                  this.audioCtx = new AudioContext({ sampleRate: desiredRate });
+            const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
       const url = URL.createObjectURL(blob);
       try {
         await this.audioCtx.audioWorklet.addModule(url);
-      } finally {
+              } finally {
         URL.revokeObjectURL(url);
       }
     }
 
     if (this.audioCtx.state === "suspended") {
-      await this.audioCtx.resume();
-    }
+            await this.audioCtx.resume();
+          }
 
     if (!this.workletNode) {
-      this.workletNode = new AudioWorkletNode(this.audioCtx, "pcm-processor", {
+                  this.workletNode = new AudioWorkletNode(this.audioCtx, "pcm-processor", {
         processorOptions: {
           startThreshold: Math.round(desiredRate * this.wasmStartThresholdSec),
           resumeThreshold: Math.round(desiredRate * this.wasmResumeThresholdSec),
@@ -463,17 +469,17 @@ export class TTSEngine {
             bufferSeconds: data.length / this.sampleRate,
           });
         } else if (data.type === "state") {
-          console.log("[Pocket TTS] engine: worklet state", data.state, { buffered: this.status.bufferSeconds });
-          if (data.state === "buffering") {
-            this.updateStatus({ state: "buffering" });
+                    if (data.state === "buffering") {
+                        this.updateStatus({ state: "buffering" });
           } else if (data.state === "playing") {
-            this.updateStatus({ state: "playing" });
+                        this.updateStatus({ state: "playing" });
           }
         } else if (data.type === "underrun") {
-          console.log("[Pocket TTS] engine: worklet underrun", { count: data.count, buffered: this.status.bufferSeconds });
-          this.handleUnderrun();
+                              this.handleUnderrun();
         } else if (data.type === "first_audio") {
-          this.firstAudioAt = performance.now();
+                    this.firstAudioAt = performance.now();
+        } else if (data.type === "drained") {
+          this.doneListener?.();
         }
       };
     }
@@ -488,7 +494,7 @@ export class TTSEngine {
   }
 
   disconnectWorklet(): void {
-    if (this.workletNode) {
+        if (this.workletNode) {
       this.workletNode.disconnect();
       this.workletNode = null;
     }
@@ -521,12 +527,7 @@ export class TTSEngine {
       MAX_WASM_RESUME_THRESHOLD_SEC,
       this.wasmResumeThresholdSec + 0.06,
     );
-    console.log("[Pocket TTS] engine: raised thresholds", {
-      startSec: this.wasmStartThresholdSec,
-      resumeSec: this.wasmResumeThresholdSec,
-      rebufferCount: this.rebufferCount,
-    });
-    this.applyWasmThresholds();
+        this.applyWasmThresholds();
   }
 
   private tuneWasmThresholds(ttfaMs: number | null, rebuffers: number): void {
@@ -558,37 +559,35 @@ export class TTSEngine {
         this.wasmResumeThresholdSec - 0.005,
       );
     }
-    console.log("[Pocket TTS] engine: tuned thresholds", {
-      startSec: this.wasmStartThresholdSec,
-      resumeSec: this.wasmResumeThresholdSec,
-      rebuffers,
-      ttfaMs,
-    });
-  }
+      }
 
   feedSamples(samples: Float32Array): void {
-    if (!this.workletNode) return;
-    console.log("[Pocket TTS] feedSamples", { length: samples.length, postedAt: Date.now() });
-    // Clone rather than transfer: the chunk crossed extension message
+    if (!this.workletNode) {
+            return;
+    }
+        // Clone rather than transfer: the chunk crossed extension message
     // boundaries and its underlying buffer may not be transferable here.
+    this.samplesFed += samples.length;
+    if (this.samplesFed <= samples.length || this.samplesFed % (24000 * 2) < samples.length) {
+          }
     this.workletNode.port.postMessage({ type: "samples", samples });
   }
 
   endStream(): void {
-    if (this.workletNode) {
+        if (this.workletNode) {
       this.workletNode.port.postMessage({ type: "end" });
     }
   }
 
   async generate(text: string, voice: WasmWorkerVoiceInput): Promise<void> {
-    await this.prepareVoice(voice);
-    // Always create a fresh AudioWorkletNode. The previous generation's node
-    // may have been terminated by the browser after the worklet returned false.
     this.disconnectWorklet();
+    await this.prepareVoice(voice);
     await this.ensureAudio();
-    this.resetWorklet();
+            this.resetWorklet();
     this.applyWasmThresholds();
 
+    this.samplesFed = 0;
+    this.chunksReceived = 0;
     this.rebufferCount = 0;
     this.streamStartAt = performance.now();
     this.firstAudioAt = null;
@@ -603,7 +602,7 @@ export class TTSEngine {
   }
 
   stop(): void {
-    if (this.worker) {
+        if (this.worker) {
       const stopMessage: WasmWorkerRequest = { kind: "stop" };
       this.worker.postMessage(stopMessage);
     }
@@ -651,9 +650,9 @@ export class TTSEngine {
       this.activeStreamRequestId = requestId;
     }
 
-    return new Promise((resolve, reject) => {
+            return new Promise((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject });
-      this.worker!.postMessage(requestWithId);
+                  this.worker!.postMessage(requestWithId);
     });
   }
 
@@ -671,7 +670,7 @@ export class TTSEngine {
     }
 
     if (data.kind === "stream_chunk") {
-      const receivedAt = Date.now();
+            const receivedAt = Date.now();
       const rawChunk = data.chunk;
       let chunk: Float32Array;
       let decodeMs = 0;
@@ -688,30 +687,29 @@ export class TTSEngine {
         });
         return;
       }
+      this.chunksReceived += 1;
+      const isFirst = this.chunksReceived === 1;
+      const isPeriodic = this.chunksReceived % 20 === 0;
+      if (isFirst || isPeriodic) {
+              }
       this.chunkListener?.(chunk);
       this.feedSamples(chunk);
-      console.log("[Pocket TTS] engine: chunk", {
-        receivedAt,
-        decodeMs: Math.round(decodeMs),
-        chunkLength: chunk.length,
-      });
-      return;
+            return;
     }
 
     if (data.kind === "stream_done") {
-      this.endStream();
+                  this.endStream();
       this.updateStatus({ state: "finished" });
-      this.doneListener?.();
       return;
     }
 
     if (data.kind === "stream_error") {
-      this.errorListener?.(data.error);
+                  this.errorListener?.(data.error);
       return;
     }
 
     if (data.kind === "rpc_ok") {
-      const pending = this.pending.get(data.requestId);
+                  const pending = this.pending.get(data.requestId);
       if (pending) {
         pending.resolve(data.payload);
         this.pending.delete(data.requestId);
@@ -723,7 +721,7 @@ export class TTSEngine {
     }
 
     if (data.kind === "rpc_err") {
-      const pending = this.pending.get(data.requestId);
+                  const pending = this.pending.get(data.requestId);
       if (pending) {
         const isAbort = data.error === "abort" || data.error.toLowerCase().includes("abort");
         if (!isAbort) {

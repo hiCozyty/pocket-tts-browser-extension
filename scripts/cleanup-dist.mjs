@@ -26,8 +26,7 @@ const removeDir = (dir) => {
     }
   }
   rmdirSync(dir);
-  console.log(`removed dist/${relative(dist, dir)}/`);
-};
+  };
 
 for (const name of ["wasm", "icons"]) {
   const target = resolve(dist, name);
@@ -46,8 +45,7 @@ if (existsSync(assetsDir)) {
     const oldPath = resolve(assetsDir, oldName);
     const newPath = resolve(assetsDir, newName);
     renameSync(oldPath, newPath);
-    console.log(`renamed dist/assets/${oldName} -> ${newName}`);
-
+    
     for (const ref of readdirSync(assetsDir)) {
       if (!ref.endsWith(".js") && !ref.endsWith(".ts")) continue;
       const refPath = resolve(assetsDir, ref);
@@ -55,7 +53,6 @@ if (existsSync(assetsDir)) {
       if (!content.includes(oldName)) continue;
       const updated = content.split(oldName).join(newName);
       writeFileSync(refPath, updated, "utf8");
-      console.log(`  updated reference in dist/assets/${ref}`);
-    }
+          }
   }
 }

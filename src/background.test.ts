@@ -178,7 +178,7 @@ describe("background", () => {
       portId: expect.any(Number),
       msg: { kind: "init" },
     });
-    expect(log).toHaveBeenCalledWith("[Pocket TTS] bg: offscreen ready");
+    expect(log).toHaveBeenCalledWith("[Pocket TTS] bg: offscreen ready signal received");
   });
 
   it("forwards port messages to offscreen via sendMessage", async () => {
