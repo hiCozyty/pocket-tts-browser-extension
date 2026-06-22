@@ -80,6 +80,7 @@ interface WasmModelLike {
   load_voice_from_buffer(wavBytes: Uint8Array): void;
   load_voice_from_safetensors(bytes: Uint8Array): void;
   load_voice_from_state_bytes(bytes: Uint8Array): void;
+  load_voice_from_cache_bytes(bytes: Uint8Array): void;
   save_voice_state_to_bytes(): Uint8Array;
   set_no_chunking(): void;
   dump_voice_state(): void;
@@ -284,7 +285,7 @@ const handlePrepareVoice = async (
 
     const cached = await workerCache.get(cacheKey);
     if (cached) {
-      readyModel.load_voice_from_state_bytes(cached);
+      readyModel.load_voice_from_cache_bytes(cached);
       postOk(message.requestId);
       return;
     }
