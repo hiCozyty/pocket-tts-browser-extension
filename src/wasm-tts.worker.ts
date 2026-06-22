@@ -80,6 +80,7 @@ interface WasmModelLike {
   load_voice_from_buffer(wavBytes: Uint8Array): void;
   load_voice_from_safetensors(bytes: Uint8Array): void;
   load_voice_from_state_bytes(bytes: Uint8Array): void;
+  save_voice_state_to_bytes(): Uint8Array;
   set_no_chunking(): void;
   dump_voice_state(): void;
   get_dim_info(): Record<string, unknown>;
@@ -261,6 +262,17 @@ const handleInit = async (message: Extract<WasmWorkerRequest, { kind: "init" }>)
   postOk(message.requestId, { sampleRate });
 };
 
+const hashString = (s: string): string => {
+  let hash = 5381;
+  const len = Math.min(s.length, 4096);
+  for (let i = 0; i < len; i++) {
+    hash = ((hash << 5) + hash + s.charCodeAt(i)) & 0x7fffffff;
+  }
+  return hash.toString(36);
+};
+
+const VOICE_CLONE_CACHE_PREFIX = "voice:v3:clone";
+
 const handlePrepareVoice = async (
   message: Extract<WasmWorkerRequest, { kind: "prepare_voice" }>,
 ) => {
@@ -268,12 +280,29 @@ const handlePrepareVoice = async (
   const input: WasmWorkerVoiceInput = message.voice;
 
   if (input.kind === "wav") {
+    const cacheKey = `${VOICE_CLONE_CACHE_PREFIX}:${hashString(input.wavB64)}`;
+
+    if (workerCache) {
+      const cached = await workerCache.get(cacheKey);
+      if (cached) {
+        readyModel.load_voice_from_state_bytes(cached);
+        postOk(message.requestId);
+        return;
+      }
+    }
+
     const binary = atob(input.wavB64);
     const wavBytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       wavBytes[i] = binary.charCodeAt(i);
     }
     readyModel.load_voice_from_buffer(wavBytes);
+
+    if (workerCache) {
+      const stateBytes = readyModel.save_voice_state_to_bytes();
+      await workerCache.put(cacheKey, stateBytes);
+    }
+
     postOk(message.requestId);
     return;
   }
