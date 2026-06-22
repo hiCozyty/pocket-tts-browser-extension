@@ -1,0 +1,11 @@
+node_modules
+dist
+.DS_Store
+*.log
+.vite
+.cache
+public/wasm/*
+public/models/*
+public/icons/*
+!public/wasm/.gitkeep
+!public/models/.gitkeep
