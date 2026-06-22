@@ -62,6 +62,21 @@ const putCachedAsset = async (asset: CachedAsset): Promise<void> => {
 };
 
 export const workerCache = {
+  async get(key: string): Promise<Uint8Array | null> {
+    const asset = await getCachedAsset(key);
+    return asset?.bytes ?? null;
+  },
+
+  async put(key: string, bytes: Uint8Array): Promise<void> {
+    await putCachedAsset({
+      key,
+      bytes,
+      contentType: "application/octet-stream",
+      cachedAt: Date.now(),
+      size: bytes.byteLength,
+    });
+  },
+
   async fetchWithCache(
     key: string,
     url: string,
