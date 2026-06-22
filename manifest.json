@@ -5,7 +5,8 @@
   "description": "Highlight any text on the web and listen to it spoken aloud using Pocket TTS — runs entirely in your browser, no server required.",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "offscreen"
   ],
   "host_permissions": [
     "https://*/*"
@@ -42,11 +43,16 @@
     {
       "resources": [
         "public/wasm/*",
-        "public/models/*"
+        "public/models/*",
+        "debug-wasm.html",
+        "debug-offscreen.html"
       ],
       "matches": ["<all_urls>"]
     }
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "pocket-tts@anomaly.co",

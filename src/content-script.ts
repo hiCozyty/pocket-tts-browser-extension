@@ -380,6 +380,7 @@ class FloatingUI {
     root.appendChild(this.buttonContainer);
 
     this.transcribeButton.addEventListener("click", (e) => {
+      console.debug("[Pocket TTS] transcribe button click");
       e.preventDefault();
       e.stopPropagation();
       void this.handleTranscribeClick();
@@ -409,6 +410,10 @@ class FloatingUI {
 
   getRoot(): HTMLElement {
     return this.root;
+  }
+
+  getHost(): HTMLElement {
+    return this.host;
   }
 
   show(selection: SelectionData): void {
@@ -444,6 +449,8 @@ class FloatingUI {
       clearTimeout(this.hideTimeout);
     }
     this.hideTimeout = window.setTimeout(() => {
+      this.hideTimeout = null;
+      if (this.isPlaying) return;
       const root = this.getRoot();
       if (root) {
         root.setAttribute("data-state", "hidden");
@@ -553,17 +560,34 @@ class FloatingUI {
   }
 
   private async handleTranscribeClick(): Promise<void> {
-    if (!this.engine || !this.config) return;
-    if (!this.currentSelection) return;
+    console.debug("[Pocket TTS] handleTranscribeClick: enter");
+    if (!this.engine) {
+      console.debug("[Pocket TTS] handleTranscribeClick: no engine, bailing");
+      return;
+    }
+    if (!this.config) {
+      console.debug("[Pocket TTS] handleTranscribeClick: no config, bailing");
+      return;
+    }
+    if (!this.currentSelection) {
+      console.debug("[Pocket TTS] handleTranscribeClick: no currentSelection, bailing");
+      return;
+    }
 
     const text = this.currentSelection.text.trim();
-    if (!text) return;
+    if (!text) {
+      console.debug("[Pocket TTS] handleTranscribeClick: empty text, bailing");
+      return;
+    }
 
     if (!isPresetVoice(this.config.voice)) {
+      console.debug("[Pocket TTS] handleTranscribeClick: bad voice", this.config.voice);
       this.hintText.textContent = "Bad voice";
       this.setMode("error");
       return;
     }
+
+    console.debug("[Pocket TTS] handleTranscribeClick: starting", { chars: text.length, voice: this.config.voice });
 
     this.pcmChunks = [];
     this.downloadButton.style.display = "none";
@@ -571,6 +595,13 @@ class FloatingUI {
     this.hintText.textContent = "Loading...";
 
     const statusHandler = (status: EngineStatus) => {
+      console.debug("[Pocket TTS] status", {
+        state: status.state,
+        phase: status.loadPhase,
+        progress: status.loadProgress,
+        message: status.message,
+        error: status.error,
+      });
       this.setProgress(status.loadProgress);
       if (status.error) {
         this.hintText.textContent = status.error.length > 30
@@ -601,11 +632,13 @@ class FloatingUI {
         hfToken: this.config.hfToken,
       };
 
+      console.debug("[Pocket TTS] handleTranscribeClick: calling engine.generate");
       const generationPromise = this.engine.generate(text, voiceInput);
 
       const pollForAnalyser = (): void => {
         const analyser = this.engine?.getAnalyser();
         if (analyser) {
+          console.debug("[Pocket TTS] handleTranscribeClick: analyser attached, showing equalizer");
           this.attachAnalyser(analyser);
           this.equalizer?.setVisible(true);
         } else {
@@ -615,8 +648,10 @@ class FloatingUI {
       pollForAnalyser();
 
       await generationPromise;
+      console.debug("[Pocket TTS] handleTranscribeClick: generation complete");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error("[Pocket TTS] handleTranscribeClick: failed", msg, err);
       this.hintText.textContent = msg.length > 30 ? msg.slice(0, 30) + "…" : msg;
       this.isPlaying = false;
       this.setMode("error");
@@ -822,8 +857,8 @@ const main = async (): Promise<void> => {
   });
 
   document.addEventListener("mousedown", (e) => {
-    const target = e.target as Element;
-    if (target && target.closest && target.closest(`#${HOST_ID}`)) {
+    const path = e.composedPath();
+    if (path.includes(ui.getRoot()) || path.includes(ui.getHost())) {
       return;
     }
     if (!ui.isPlayingAudio()) {

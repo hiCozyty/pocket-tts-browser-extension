@@ -6,6 +6,7 @@ import type {
   WasmWorkerRequest,
   WasmWorkerVoiceInput,
 } from "./protocol";
+import { deserializeFloat32Array, isSerializedFloat32Array } from "./protocol";
 
 type StatusListener = (status: EngineStatus) => void;
 type ChunkListener = (samples: Float32Array) => void;
@@ -34,10 +35,14 @@ class PCMProcessor extends AudioWorkletProcessor {
     const resumeThreshold = options && options.processorOptions ? options.processorOptions.resumeThreshold : undefined;
     this.startThreshold = Number.isFinite(startThreshold) ? startThreshold : (24000 * 2.5);
     this.resumeThreshold = Number.isFinite(resumeThreshold) ? resumeThreshold : (24000 * 0.45);
+    console.log('[Pocket TTS] worklet: init startThreshold =', this.startThreshold, 'resumeThreshold =', this.resumeThreshold);
 
     this.port.onmessage = (event) => {
       const msg = event.data || {};
       if (msg.type === 'samples' && msg.samples) {
+        const len = msg.samples.length || 0;
+        const first = len > 0 ? msg.samples[0] : 0;
+        console.log('[Pocket TTS] worklet: received samples len =', len, 'first =', first, 'instanceof Float32Array =', msg.samples instanceof Float32Array);
         if (msg.samples instanceof Float32Array) {
           this.queue.push(msg.samples);
         } else if (msg.samples.buffer) {
@@ -51,6 +56,7 @@ class PCMProcessor extends AudioWorkletProcessor {
           this.resumeThreshold = msg.resumeThreshold;
         }
       } else if (msg.type === 'end') {
+        console.log('[Pocket TTS] worklet: received end, buffered =', this.bufferedSamples(), 'hasStarted =', this.hasStarted);
         this.ended = true;
       } else if (msg.type === 'reset') {
         this.queue = [];
@@ -93,6 +99,7 @@ class PCMProcessor extends AudioWorkletProcessor {
 
     this.tick += 1;
     if (this.tick % 20 === 0) {
+      console.log('[Pocket TTS] worklet: tick buffered =', buffered, 'threshold =', this.startThreshold, 'hasStarted =', this.hasStarted, 'ended =', this.ended, 'queue =', this.queue.length);
       this.port.postMessage({ type: 'buffer', length: buffered });
     }
 
@@ -101,15 +108,18 @@ class PCMProcessor extends AudioWorkletProcessor {
         this.fillSilence(channel);
         if (!this.isBuffering) {
           this.isBuffering = true;
+          console.log('[Pocket TTS] worklet: buffering, buffered =', buffered, 'threshold =', this.startThreshold);
           this.port.postMessage({ type: 'state', state: 'buffering' });
         }
         if (this.ended && buffered === 0) {
+          console.log('[Pocket TTS] worklet: ended with no samples, stopping');
           return false;
         }
         return true;
       }
       this.hasStarted = true;
       this.isBuffering = false;
+      console.log('[Pocket TTS] worklet: starting playback, buffered =', buffered);
       this.port.postMessage({ type: 'state', state: 'playing' });
     }
 
@@ -175,8 +185,68 @@ const initialStatus: EngineStatus = {
   bufferSeconds: 0,
 };
 
+interface WorkerHandle {
+  postMessage(msg: WasmWorkerRequest): void;
+  terminate(): void;
+  onmessage: ((e: MessageEvent<WasmWorkerEvent>) => void) | null;
+  onerror: ((e: ErrorEvent) => void) | null;
+}
+
+const PORT_NAME = "pocket-tts-worker";
+
+class BackgroundWorkerProxy implements WorkerHandle {
+  private readonly port: chrome.runtime.Port;
+  onmessage: ((e: MessageEvent<WasmWorkerEvent>) => void) | null = null;
+  onerror: ((e: ErrorEvent) => void) | null = null;
+
+  constructor() {
+    this.port = chrome.runtime.connect({ name: PORT_NAME });
+
+    this.port.onMessage.addListener((msg) => {
+      const handler = this.onmessage;
+      if (handler) {
+        try {
+          handler({ data: msg as WasmWorkerEvent } as MessageEvent<WasmWorkerEvent>);
+        } catch (err) {
+          console.error("[Pocket TTS] proxy onmessage threw", err);
+        }
+      }
+    });
+
+    this.port.onDisconnect.addListener(() => {
+      if (chrome.runtime.lastError) {
+        const err = new Error(chrome.runtime.lastError.message || "Port disconnected");
+        this.onerror?.({
+          message: err.message,
+          filename: "",
+          lineno: 0,
+          colno: 0,
+          error: err,
+        } as ErrorEvent);
+      }
+    });
+  }
+
+  postMessage(msg: WasmWorkerRequest): void {
+    try {
+      this.port.postMessage(msg);
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      this.onerror?.({ message: m, filename: "", lineno: 0, colno: 0, error: err } as ErrorEvent);
+    }
+  }
+
+  terminate(): void {
+    try {
+      this.port.disconnect();
+    } catch {
+      // already disconnected
+    }
+  }
+}
+
 export class TTSEngine {
-  private worker: Worker | null = null;
+  private worker: WorkerHandle | null = null;
   private nextRequestId = 1;
   private activeStreamRequestId: number | null = null;
   private statusListener: StatusListener | null = null;
@@ -212,9 +282,8 @@ export class TTSEngine {
       this.worker.terminate();
       this.worker = null;
     }
-    this.worker = new Worker(new URL("./wasm-tts.worker.ts", import.meta.url), {
-      type: "module",
-    });
+    console.log("[Pocket TTS] engine: opening worker port");
+    this.worker = new BackgroundWorkerProxy();
     this.worker.onmessage = (e: MessageEvent<WasmWorkerEvent>) => this.handleWorkerMessage(e);
     this.worker.onerror = (e) => {
       this.updateStatus({
@@ -323,8 +392,11 @@ export class TTSEngine {
     }
 
     if (this.audioCtx && this.workletNode && this.analyser) {
+      console.log("[Pocket TTS] ensureAudio: existing context state =", this.audioCtx.state);
       if (this.audioCtx.state === "suspended") {
+        console.log("[Pocket TTS] ensureAudio: resuming existing context");
         await this.audioCtx.resume();
+        console.log("[Pocket TTS] ensureAudio: resumed existing context state =", this.audioCtx.state);
       }
       return { sampleRate: this.sampleRate };
     }
@@ -332,6 +404,7 @@ export class TTSEngine {
     const desiredRate = this.sampleRate;
 
     if (this.audioCtx && Math.round(this.audioCtx.sampleRate) !== desiredRate) {
+      console.log("[Pocket TTS] ensureAudio: sample rate mismatch, recreating context", this.audioCtx.sampleRate, "!=", desiredRate);
       await this.audioCtx.close();
       this.audioCtx = null;
       this.workletNode = null;
@@ -340,7 +413,12 @@ export class TTSEngine {
     }
 
     if (!this.audioCtx) {
+      console.log("[Pocket TTS] ensureAudio: creating AudioContext sampleRate =", desiredRate);
       this.audioCtx = new AudioContext({ sampleRate: desiredRate });
+      console.log("[Pocket TTS] ensureAudio: new context state =", this.audioCtx.state, "actual sampleRate =", this.audioCtx.sampleRate);
+      this.audioCtx.addEventListener("statechange", () => {
+        console.log("[Pocket TTS] audioCtx statechange:", this.audioCtx?.state);
+      });
       const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
       const url = URL.createObjectURL(blob);
       try {
@@ -351,7 +429,9 @@ export class TTSEngine {
     }
 
     if (this.audioCtx.state === "suspended") {
+      console.log("[Pocket TTS] ensureAudio: resuming context");
       await this.audioCtx.resume();
+      console.log("[Pocket TTS] ensureAudio: resumed context state =", this.audioCtx.state);
     }
 
     if (!this.workletNode) {
@@ -417,7 +497,18 @@ export class TTSEngine {
 
   feedSamples(samples: Float32Array): void {
     if (!this.workletNode) return;
-    this.workletNode.port.postMessage({ type: "samples", samples }, [samples.buffer]);
+    const nonZero = samples.length > 0 ? Math.max(...Array.from(samples.slice(0, Math.min(samples.length, 10))).map(Math.abs)) : 0;
+    console.log("[Pocket TTS] feedSamples:", {
+      length: samples.length,
+      isFloat32Array: samples instanceof Float32Array,
+      maxAbsFirst10: nonZero,
+      min: samples.length > 0 ? Math.min(...Array.from(samples)) : 0,
+      max: samples.length > 0 ? Math.max(...Array.from(samples)) : 0,
+    });
+    // Clone rather than transfer: the chunk may have crossed extension
+    // message boundaries (which don't preserve transfer lists) and its
+    // underlying buffer may not be transferable in this context.
+    this.workletNode.port.postMessage({ type: "samples", samples });
   }
 
   endStream(): void {
@@ -503,8 +594,25 @@ export class TTSEngine {
     }
 
     if (data.kind === "stream_chunk") {
-      this.chunkListener?.(data.chunk);
-      this.feedSamples(data.chunk);
+      const rawChunk = data.chunk;
+      let chunk: Float32Array;
+      if (rawChunk instanceof Float32Array) {
+        chunk = rawChunk;
+      } else if (isSerializedFloat32Array(rawChunk)) {
+        chunk = deserializeFloat32Array(rawChunk);
+      } else {
+        console.warn("[Pocket TTS] handleWorkerMessage stream_chunk: unexpected chunk type", {
+          chunkType: typeof rawChunk,
+          chunkConstructor: (rawChunk as { constructor?: { name?: string } })?.constructor?.name,
+        });
+        return;
+      }
+      console.log("[Pocket TTS] handleWorkerMessage stream_chunk", {
+        chunkLength: chunk.length,
+        isFloat32Array: chunk instanceof Float32Array,
+      });
+      this.chunkListener?.(chunk);
+      this.feedSamples(chunk);
       return;
     }
 

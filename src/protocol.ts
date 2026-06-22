@@ -1,3 +1,38 @@
+export interface SerializedFloat32Array {
+  __typedarray: "Float32Array";
+  data: string; // base64 encoded raw bytes
+  length: number;
+}
+
+export const serializeFloat32Array = (arr: Float32Array): SerializedFloat32Array => {
+  const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+  const binary = String.fromCharCode(...bytes);
+  return {
+    __typedarray: "Float32Array",
+    data: btoa(binary),
+    length: arr.length,
+  };
+};
+
+export const deserializeFloat32Array = (env: SerializedFloat32Array): Float32Array => {
+  const binary = atob(env.data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Float32Array(bytes.buffer, 0, env.length);
+};
+
+export const isSerializedFloat32Array = (v: unknown): v is SerializedFloat32Array => {
+  if (typeof v !== "object" || v === null) return false;
+  const obj = v as Record<string, unknown>;
+  return (
+    obj.__typedarray === "Float32Array" &&
+    typeof obj.data === "string" &&
+    typeof obj.length === "number"
+  );
+};
+
 export type WasmAssetSource = "local" | "hf" | "manual" | "cache" | null;
 
 export type WasmLoadPhase =
@@ -78,7 +113,7 @@ export type WasmWorkerEvent =
     }
   | {
       kind: "stream_chunk";
-      chunk: Float32Array;
+      chunk: Float32Array | SerializedFloat32Array;
       computeMs: number | null;
       mergedChunks: number | null;
     }

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pocket TTS — WASM debug</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        background: #0b1020;
+        color: #e2e8f0;
+        max-width: 880px;
+        margin: 24px auto;
+        padding: 0 16px;
+        line-height: 1.45;
+      }
+      h1 { font-size: 1.4rem; margin: 0 0 0.4rem; }
+      .sub { color: #94a3b8; margin: 0 0 1rem; }
+      textarea {
+        width: 100%;
+        min-height: 100px;
+        background: #111a2e;
+        color: #e2e8f0;
+        border: 1px solid #243049;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font: inherit;
+      }
+      .row { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+      button {
+        background: linear-gradient(135deg, #8b5cf6, #ec4899);
+        color: white;
+        border: 0;
+        padding: 9px 14px;
+        border-radius: 8px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary { background: #243049; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      pre {
+        background: #0a1024;
+        border: 1px solid #1c2540;
+        border-radius: 8px;
+        padding: 12px;
+        overflow: auto;
+        max-height: 360px;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .ok { color: #4ade80; }
+      .err { color: #f87171; }
+      .badge { background: #1e293b; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <h1>Pocket TTS — WASM debug</h1>
+    <p class="sub">
+      Direct test of the bundled <code>pocket_tts.js</code> + safetensors, no extension plumbing.
+      Open this page in Chrome: <code>chrome-extension://&lt;id&gt;/debug-wasm.html</code>.
+    </p>
+
+    <label for="text">Text to synthesize</label>
+    <textarea id="text">The quick brown fox jumps over the lazy dog.</textarea>
+
+    <div class="row">
+      <label>HF repo <input id="repo" value="kyutai/pocket-tts-without-voice-cloning" style="width: 320px; background:#111a2e; color:#e2e8f0; border:1px solid #243049; border-radius:6px; padding:6px 8px;"/></label>
+      <label>Voice
+        <select id="voice" style="background:#111a2e; color:#e2e8f0; border:1px solid #243049; border-radius:6px; padding:6px 8px;">
+          <option value="alba">alba</option>
+          <option value="marius">marius</option>
+          <option value="javert">javert</option>
+          <option value="jean">jean</option>
+          <option value="fantine">fantine</option>
+          <option value="cosette">cosette</option>
+          <option value="eponine">eponine</option>
+          <option value="azelma">azelma</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row">
+      <button id="init">1. Init WASM + load model</button>
+      <button id="play" disabled>2. Play</button>
+      <button id="stop" class="secondary" disabled>Stop</button>
+      <span id="status" class="badge">idle</span>
+    </div>
+
+    <h3>Log</h3>
+    <pre id="log"></pre>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      const log = (...args) => {
+        const line = args
+          .map((a) => (typeof a === "string" ? a : JSON.stringify(a, null, 2)))
+          .join(" ");
+        $("log").textContent += line + "\n";
+        $("log").scrollTop = $("log").scrollHeight;
+        console.log("[debug]", ...args);
+      };
+      const setStatus = (s, cls) => {
+        const el = $("status");
+        el.textContent = s;
+        el.className = "badge " + (cls || "");
+      };
+
+      const WASM_BASE = (typeof chrome !== "undefined" && chrome.runtime?.getURL
+        ? chrome.runtime.getURL("public/wasm")
+        : new URL("./public/wasm", location.href).href);
+
+      const DEFAULT_CONFIG_YAML = `
+flow_lm:
+  dtype: float32
+  flow:
+    depth: 6
+    dim: 512
+  transformer:
+    d_model: 1024
+    hidden_scale: 4
+    max_period: 10000
+    num_heads: 16
+    num_layers: 6
+  lookup_table:
+    dim: 1024
+    n_bins: 4000
+    tokenizer: sentencepiece
+    tokenizer_path: hf://kyutai/pocket-tts-without-voice-cloning/tokenizer.model@d4fdd22ae8c8e1cb3634e150ebeff1dab2d16df3
+mimi:
+  dtype: float32
+  sample_rate: 24000
+  channels: 1
+  frame_rate: 12.5
+  seanet:
+    dimension: 512
+    channels: 1
+    n_filters: 64
+    n_residual_layers: 1
+    ratios: [6, 5, 4]
+    kernel_size: 7
+    residual_kernel_size: 3
+    last_kernel_size: 3
+    dilation_base: 2
+    pad_mode: constant
+    compress: 2
+  transformer:
+    d_model: 512
+    num_heads: 8
+    num_layers: 2
+    layer_scale: 0.01
+    context: 250
+    dim_feedforward: 2048
+    input_dimension: 512
+    output_dimensions: [512]
+  quantizer:
+    dimension: 32
+    output_dimension: 512
+`;
+
+      let tts = null;
+      let audioCtx = null;
+      let workletNode = null;
+      let stopRequested = false;
+
+      const WORKLET_SOURCE = `
+class StreamPlayerProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.queue = [];
+    this.queueOffset = 0;
+    this.ended = false;
+    this.started = false;
+    this.startThreshold = 0;
+    this.port.onmessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'chunk') {
+        const d = msg.data;
+        if (d instanceof Float32Array) this.queue.push(d);
+        else if (d instanceof ArrayBuffer) this.queue.push(new Float32Array(d));
+        else if (d && d.buffer) this.queue.push(new Float32Array(d.buffer));
+      } else if (msg.type === 'end') this.ended = true;
+      else if (msg.type === 'reset') {
+        this.queue = []; this.queueOffset = 0; this.ended = false; this.started = false;
+      } else if (msg.type === 'config') {
+        this.startThreshold = msg.startThreshold || 0;
+      }
+    };
+  }
+  bufferedFrames() {
+    let total = -this.queueOffset;
+    for (const c of this.queue) total += c.length;
+    return Math.max(0, total);
+  }
+  process(inputs, outputs) {
+    const output = outputs[0];
+    if (!output || output.length === 0) return true;
+    const ch = output[0];
+    let idx = 0;
+    if (!this.started) {
+      if (this.bufferedFrames() >= this.startThreshold) this.started = true;
+      else {
+        ch.fill(0);
+        if (this.ended && this.bufferedFrames() === 0) return false;
+        return true;
+      }
+    }
+    while (idx < ch.length) {
+      if (this.queue.length === 0) { ch.fill(0, idx); break; }
+      const current = this.queue[0];
+      const available = current.length - this.queueOffset;
+      const toCopy = Math.min(available, ch.length - idx);
+      ch.set(current.subarray(this.queueOffset, this.queueOffset + toCopy), idx);
+      idx += toCopy; this.queueOffset += toCopy;
+      if (this.queueOffset >= current.length) { this.queue.shift(); this.queueOffset = 0; }
+    }
+    if (this.ended && this.queue.length === 0) return false;
+    return true;
+  }
+}
+registerProcessor('stream-player', StreamPlayerProcessor);
+`;
+
+      $("init").onclick = async () => {
+        try {
+          setStatus("loading wasm…");
+          const mod = await import(WASM_BASE + "/pocket_tts.js");
+          await mod.default();
+          log("✓ WASM runtime initialized", WASM_BASE);
+
+          tts = new mod.WasmTTSModel();
+
+          const repo = $("repo").value.trim();
+          const voice = $("voice").value;
+          const weightsUrl = `https://huggingface.co/${repo}/resolve/main/tts_b6369a24.safetensors`;
+          const embUrl = `https://huggingface.co/${repo}/resolve/main/embeddings/${voice}.safetensors`;
+
+          setStatus("downloading model (~500 MB)…");
+          const weights = new Uint8Array(await (await fetch(weightsUrl)).arrayBuffer());
+          log("✓ weights downloaded", weights.length, "bytes");
+
+          setStatus("compiling model in WASM…");
+          tts.load_from_buffer(new TextEncoder().encode(DEFAULT_CONFIG_YAML), weights, new Uint8Array(0));
+          log("✓ model loaded, sample_rate =", tts.sample_rate);
+
+          setStatus("downloading voice embedding…");
+          const emb = new Uint8Array(await (await fetch(embUrl)).arrayBuffer());
+          tts.load_voice_from_safetensors(emb);
+          log("✓ voice loaded:", voice);
+
+          $("play").disabled = false;
+          setStatus("ready", "ok");
+        } catch (e) {
+          log("✗ init failed:", e?.message || String(e), e);
+          setStatus("error", "err");
+        }
+      };
+
+      $("play").onclick = async () => {
+        if (!tts?.is_ready()) return;
+        const text = $("text").value.trim();
+        if (!text) return;
+        try {
+          stopRequested = false;
+          $("play").disabled = true;
+          $("stop").disabled = false;
+          setStatus("synthesizing…");
+
+          if (audioCtx) { await audioCtx.close(); audioCtx = null; }
+          audioCtx = new AudioContext({ sampleRate: tts.sample_rate });
+          const workletBlob = new Blob([WORKLET_SOURCE], { type: "application/javascript" });
+          const workletUrl = URL.createObjectURL(workletBlob);
+          await audioCtx.audioWorklet.addModule(workletUrl);
+          URL.revokeObjectURL(workletUrl);
+          workletNode = new AudioWorkletNode(audioCtx, "stream-player");
+          workletNode.connect(audioCtx.destination);
+
+          const sampleRate = tts.sample_rate;
+          const stream = tts.start_stream(text);
+          const targetSamples = Math.max(1024, Math.floor(sampleRate * 0.18));
+          const startThreshold = Math.floor(sampleRate * 0.25);
+          workletNode.port.postMessage({ type: "config", startThreshold });
+          if (audioCtx.state === "running") await audioCtx.suspend();
+
+          let chunks = 0;
+          while (!stopRequested) {
+            const chunk = stream.next_chunk_min_samples(targetSamples);
+            if (chunk == null) break;
+            chunks += 1;
+            workletNode.port.postMessage({ type: "chunk", data: chunk }, [chunk.buffer]);
+            if (chunks === 1) {
+              log("first chunk arrived, resuming audio context");
+              await audioCtx.resume();
+            }
+            await new Promise((r) => setTimeout(r, 0));
+          }
+          workletNode.port.postMessage({ type: "end" });
+          log("✓ stream complete, chunks =", chunks);
+          setStatus("done", "ok");
+        } catch (e) {
+          log("✗ play failed:", e?.message || String(e), e);
+          setStatus("error", "err");
+        } finally {
+          $("play").disabled = false;
+          $("stop").disabled = true;
+        }
+      };
+
+      $("stop").onclick = () => {
+        stopRequested = true;
+        if (workletNode) {
+          workletNode.port.postMessage({ type: "reset" });
+          workletNode = null;
+        }
+        if (audioCtx) { audioCtx.close(); audioCtx = null; }
+        $("play").disabled = false;
+        $("stop").disabled = true;
+        setStatus("stopped");
+      };
+
+      log("Debug page ready. WASM base =", WASM_BASE);
+    </script>
+  </body>
+</html>

@@ -17,7 +17,7 @@
     "useDefineForClassFields": true,
     "allowImportingTsExtensions": false,
     "verbatimModuleSyntax": false,
-    "types": ["chrome", "firefox-webext-browser"],
+    "types": ["chrome", "firefox-webext-browser", "vitest/globals", "vite/client"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

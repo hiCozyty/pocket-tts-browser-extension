@@ -1,5 +1,7 @@
 /// <reference lib="webworker" />
 
+console.log("[Pocket TTS] worker: module loaded");
+
 import type {
   WasmLoadStatus,
   WasmWorkerEvent,
@@ -7,6 +9,7 @@ import type {
   WasmWorkerVoiceInput,
 } from "./protocol";
 import { isPresetVoice } from "./protocol";
+import { workerCache } from "./worker-cache";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -209,12 +212,7 @@ const handleInit = async (message: Extract<WasmWorkerRequest, { kind: "init" }>)
   }
   await bindings.default();
 
-  let cache: CacheAdapter | null = null;
-  try {
-    cache = (await import("./worker-cache.js")).workerCache;
-  } catch {
-    cache = null;
-  }
+  const cache: CacheAdapter | null = workerCache;
 
   postStatus({
     phase: "loading-assets",
@@ -282,13 +280,7 @@ const handlePrepareVoice = async (
     throw new Error(`Unknown preset voice: ${input.voice}`);
   }
 
-  let cache: CacheAdapter | null = null;
-  try {
-    cache = (await import("./worker-cache.js")).workerCache;
-  } catch {
-    cache = null;
-  }
-
+  const cache: CacheAdapter | null = workerCache;
   const bytes = await fetchEmbedding(input.voice, input.hfRepo, input.hfToken, cache, true);
   readyModel.load_voice_from_safetensors(bytes);
   postOk(message.requestId);
@@ -356,6 +348,8 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
     return;
   }
 
+  console.log("[Pocket TTS] worker: onmessage", { kind: message.kind, requestId: (message as { requestId?: number }).requestId });
+
   if (message.kind === "stop") {
     stopRequested = true;
     activeStreamToken += 1;
@@ -365,7 +359,11 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
   void (async () => {
     try {
       if (message.kind === "init") {
+        console.log("[Pocket TTS] worker: handleInit, wasmBase =", (message as { wasmBase?: string }).wasmBase);
+        const modulePath = `${(message as { wasmBase: string }).wasmBase.replace(/\/+$/, "")}/pocket_tts.js`;
+        console.log("[Pocket TTS] worker: importing WASM from", modulePath);
         await handleInit(message);
+        console.log("[Pocket TTS] worker: handleInit complete");
         return;
       }
 
@@ -379,6 +377,7 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
         return;
       }
     } catch (err) {
+      console.error("[Pocket TTS] worker: handler threw", err);
       if (message.kind === "start_stream") {
         const text = err instanceof Error ? err.message : String(err);
         postEvent({ kind: "stream_error", error: text });
