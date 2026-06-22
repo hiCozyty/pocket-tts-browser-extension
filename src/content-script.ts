@@ -620,6 +620,12 @@ const main = async (): Promise<void> => {
   const config = await loadConfig();
   ui.setConfig(config);
 
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && changes[STORAGE_KEY]) {
+      ui.setConfig(changes[STORAGE_KEY].newValue as RuntimeConfig);
+    }
+  });
+
   const handleSelectionChange = (): void => {
     try {
       if (ui.isPlayingAudio()) {
