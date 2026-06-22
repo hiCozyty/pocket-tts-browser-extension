@@ -582,6 +582,9 @@ export class TTSEngine {
 
   async generate(text: string, voice: WasmWorkerVoiceInput): Promise<void> {
     await this.prepareVoice(voice);
+    // Always create a fresh AudioWorkletNode. The previous generation's node
+    // may have been terminated by the browser after the worklet returned false.
+    this.disconnectWorklet();
     await this.ensureAudio();
     this.resetWorklet();
     this.applyWasmThresholds();

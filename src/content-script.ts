@@ -564,6 +564,13 @@ class FloatingUI {
       return;
     }
 
+    if (this.isPlaying) {
+      this.engine.stop();
+      this.isPlaying = false;
+      this.setMode("idle");
+      this.equalizer?.setVisible(false);
+    }
+
     const text = this.currentSelection.text.trim();
     if (!text) {
       return;
