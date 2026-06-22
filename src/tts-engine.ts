@@ -15,6 +15,10 @@ type ErrorListener = (message: string) => void;
 
 const DEFAULT_WASM_START_THRESHOLD_SEC = 0.22;
 const DEFAULT_WASM_RESUME_THRESHOLD_SEC = 0.34;
+const MAX_WASM_START_THRESHOLD_SEC = 1.2;
+const MAX_WASM_RESUME_THRESHOLD_SEC = 0.9;
+const MIN_WASM_START_THRESHOLD_SEC = 0.14;
+const MIN_WASM_RESUME_THRESHOLD_SEC = 0.24;
 
 const SAMPLE_RATE = 24000;
 
@@ -35,19 +39,19 @@ class PCMProcessor extends AudioWorkletProcessor {
     const resumeThreshold = options && options.processorOptions ? options.processorOptions.resumeThreshold : undefined;
     this.startThreshold = Number.isFinite(startThreshold) ? startThreshold : (24000 * 2.5);
     this.resumeThreshold = Number.isFinite(resumeThreshold) ? resumeThreshold : (24000 * 0.45);
-    console.log('[Pocket TTS] worklet: init startThreshold =', this.startThreshold, 'resumeThreshold =', this.resumeThreshold);
+    this.lastChunkAt = 0;
+    this.chunksReceived = 0;
 
     this.port.onmessage = (event) => {
       const msg = event.data || {};
       if (msg.type === 'samples' && msg.samples) {
-        const len = msg.samples.length || 0;
-        const first = len > 0 ? msg.samples[0] : 0;
-        console.log('[Pocket TTS] worklet: received samples len =', len, 'first =', first, 'instanceof Float32Array =', msg.samples instanceof Float32Array);
         if (msg.samples instanceof Float32Array) {
           this.queue.push(msg.samples);
         } else if (msg.samples.buffer) {
           this.queue.push(new Float32Array(msg.samples.buffer));
         }
+        this.lastChunkAt = Date.now();
+        this.chunksReceived += 1;
       } else if (msg.type === 'config') {
         if (Number.isFinite(msg.startThreshold)) {
           this.startThreshold = msg.startThreshold;
@@ -56,7 +60,6 @@ class PCMProcessor extends AudioWorkletProcessor {
           this.resumeThreshold = msg.resumeThreshold;
         }
       } else if (msg.type === 'end') {
-        console.log('[Pocket TTS] worklet: received end, buffered =', this.bufferedSamples(), 'hasStarted =', this.hasStarted);
         this.ended = true;
       } else if (msg.type === 'reset') {
         this.queue = [];
@@ -66,6 +69,8 @@ class PCMProcessor extends AudioWorkletProcessor {
         this.ended = false;
         this.firstAudioSent = false;
         this.underruns = 0;
+        this.lastChunkAt = 0;
+        this.chunksReceived = 0;
       }
     };
   }
@@ -99,7 +104,6 @@ class PCMProcessor extends AudioWorkletProcessor {
 
     this.tick += 1;
     if (this.tick % 20 === 0) {
-      console.log('[Pocket TTS] worklet: tick buffered =', buffered, 'threshold =', this.startThreshold, 'hasStarted =', this.hasStarted, 'ended =', this.ended, 'queue =', this.queue.length);
       this.port.postMessage({ type: 'buffer', length: buffered });
     }
 
@@ -108,18 +112,15 @@ class PCMProcessor extends AudioWorkletProcessor {
         this.fillSilence(channel);
         if (!this.isBuffering) {
           this.isBuffering = true;
-          console.log('[Pocket TTS] worklet: buffering, buffered =', buffered, 'threshold =', this.startThreshold);
           this.port.postMessage({ type: 'state', state: 'buffering' });
         }
         if (this.ended && buffered === 0) {
-          console.log('[Pocket TTS] worklet: ended with no samples, stopping');
           return false;
         }
         return true;
       }
       this.hasStarted = true;
       this.isBuffering = false;
-      console.log('[Pocket TTS] worklet: starting playback, buffered =', buffered);
       this.port.postMessage({ type: 'state', state: 'playing' });
     }
 
@@ -130,6 +131,13 @@ class PCMProcessor extends AudioWorkletProcessor {
         if (!this.isBuffering) {
           this.isBuffering = true;
           this.underruns += 1;
+          const msSinceLastChunk = this.lastChunkAt ? (Date.now() - this.lastChunkAt) : 0;
+          console.log('[Pocket TTS] worklet: underrun', {
+            count: this.underruns,
+            buffered: this.bufferedSamples(),
+            msSinceLastChunk,
+            chunksReceived: this.chunksReceived,
+          });
           this.port.postMessage({ type: 'underrun', count: this.underruns });
           this.port.postMessage({ type: 'state', state: 'buffering' });
         }
@@ -151,6 +159,7 @@ class PCMProcessor extends AudioWorkletProcessor {
 
     if (idx === channel.length && this.isBuffering && this.bufferedSamples() >= this.resumeThreshold) {
       this.isBuffering = false;
+      console.log('[Pocket TTS] worklet: resume', { buffered: this.bufferedSamples(), resumeThreshold: this.resumeThreshold });
       this.port.postMessage({ type: 'state', state: 'playing' });
     }
 
@@ -264,6 +273,12 @@ export class TTSEngine {
   private analyser: AnalyserNode | null = null;
   private gainNode: GainNode | null = null;
 
+  private wasmStartThresholdSec = DEFAULT_WASM_START_THRESHOLD_SEC;
+  private wasmResumeThresholdSec = DEFAULT_WASM_RESUME_THRESHOLD_SEC;
+  private rebufferCount = 0;
+  private streamStartAt: number | null = null;
+  private firstAudioAt: number | null = null;
+
   private readonly pending = new Map<
     number,
     { resolve: (payload?: { sampleRate?: number }) => void; reject: (err: Error) => void }
@@ -282,7 +297,6 @@ export class TTSEngine {
       this.worker.terminate();
       this.worker = null;
     }
-    console.log("[Pocket TTS] engine: opening worker port");
     this.worker = new BackgroundWorkerProxy();
     this.worker.onmessage = (e: MessageEvent<WasmWorkerEvent>) => this.handleWorkerMessage(e);
     this.worker.onerror = (e) => {
@@ -392,11 +406,8 @@ export class TTSEngine {
     }
 
     if (this.audioCtx && this.workletNode && this.analyser) {
-      console.log("[Pocket TTS] ensureAudio: existing context state =", this.audioCtx.state);
       if (this.audioCtx.state === "suspended") {
-        console.log("[Pocket TTS] ensureAudio: resuming existing context");
         await this.audioCtx.resume();
-        console.log("[Pocket TTS] ensureAudio: resumed existing context state =", this.audioCtx.state);
       }
       return { sampleRate: this.sampleRate };
     }
@@ -404,7 +415,6 @@ export class TTSEngine {
     const desiredRate = this.sampleRate;
 
     if (this.audioCtx && Math.round(this.audioCtx.sampleRate) !== desiredRate) {
-      console.log("[Pocket TTS] ensureAudio: sample rate mismatch, recreating context", this.audioCtx.sampleRate, "!=", desiredRate);
       await this.audioCtx.close();
       this.audioCtx = null;
       this.workletNode = null;
@@ -413,12 +423,7 @@ export class TTSEngine {
     }
 
     if (!this.audioCtx) {
-      console.log("[Pocket TTS] ensureAudio: creating AudioContext sampleRate =", desiredRate);
       this.audioCtx = new AudioContext({ sampleRate: desiredRate });
-      console.log("[Pocket TTS] ensureAudio: new context state =", this.audioCtx.state, "actual sampleRate =", this.audioCtx.sampleRate);
-      this.audioCtx.addEventListener("statechange", () => {
-        console.log("[Pocket TTS] audioCtx statechange:", this.audioCtx?.state);
-      });
       const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
       const url = URL.createObjectURL(blob);
       try {
@@ -429,16 +434,14 @@ export class TTSEngine {
     }
 
     if (this.audioCtx.state === "suspended") {
-      console.log("[Pocket TTS] ensureAudio: resuming context");
       await this.audioCtx.resume();
-      console.log("[Pocket TTS] ensureAudio: resumed context state =", this.audioCtx.state);
     }
 
     if (!this.workletNode) {
       this.workletNode = new AudioWorkletNode(this.audioCtx, "pcm-processor", {
         processorOptions: {
-          startThreshold: Math.round(desiredRate * DEFAULT_WASM_START_THRESHOLD_SEC),
-          resumeThreshold: Math.round(desiredRate * DEFAULT_WASM_RESUME_THRESHOLD_SEC),
+          startThreshold: Math.round(desiredRate * this.wasmStartThresholdSec),
+          resumeThreshold: Math.round(desiredRate * this.wasmResumeThresholdSec),
         },
       });
 
@@ -460,13 +463,17 @@ export class TTSEngine {
             bufferSeconds: data.length / this.sampleRate,
           });
         } else if (data.type === "state") {
+          console.log("[Pocket TTS] engine: worklet state", data.state, { buffered: this.status.bufferSeconds });
           if (data.state === "buffering") {
             this.updateStatus({ state: "buffering" });
           } else if (data.state === "playing") {
             this.updateStatus({ state: "playing" });
           }
         } else if (data.type === "underrun") {
-          // no-op
+          console.log("[Pocket TTS] engine: worklet underrun", { count: data.count, buffered: this.status.bufferSeconds });
+          this.handleUnderrun();
+        } else if (data.type === "first_audio") {
+          this.firstAudioAt = performance.now();
         }
       };
     }
@@ -495,19 +502,75 @@ export class TTSEngine {
     }
   }
 
+  private applyWasmThresholds(): void {
+    if (!this.workletNode) return;
+    this.workletNode.port.postMessage({
+      type: "config",
+      startThreshold: Math.round(this.sampleRate * this.wasmStartThresholdSec),
+      resumeThreshold: Math.round(this.sampleRate * this.wasmResumeThresholdSec),
+    });
+  }
+
+  private handleUnderrun(): void {
+    this.rebufferCount += 1;
+    this.wasmStartThresholdSec = Math.min(
+      MAX_WASM_START_THRESHOLD_SEC,
+      this.wasmStartThresholdSec + 0.08,
+    );
+    this.wasmResumeThresholdSec = Math.min(
+      MAX_WASM_RESUME_THRESHOLD_SEC,
+      this.wasmResumeThresholdSec + 0.06,
+    );
+    console.log("[Pocket TTS] engine: raised thresholds", {
+      startSec: this.wasmStartThresholdSec,
+      resumeSec: this.wasmResumeThresholdSec,
+      rebufferCount: this.rebufferCount,
+    });
+    this.applyWasmThresholds();
+  }
+
+  private tuneWasmThresholds(ttfaMs: number | null, rebuffers: number): void {
+    if (rebuffers > 0) {
+      this.wasmStartThresholdSec = Math.min(
+        MAX_WASM_START_THRESHOLD_SEC,
+        this.wasmStartThresholdSec + 0.08 * rebuffers,
+      );
+      this.wasmResumeThresholdSec = Math.min(
+        MAX_WASM_RESUME_THRESHOLD_SEC,
+        this.wasmResumeThresholdSec + 0.06 * rebuffers,
+      );
+    } else if (ttfaMs != null && ttfaMs > 600) {
+      this.wasmStartThresholdSec = Math.max(
+        MIN_WASM_START_THRESHOLD_SEC,
+        this.wasmStartThresholdSec - 0.03,
+      );
+      this.wasmResumeThresholdSec = Math.max(
+        MIN_WASM_RESUME_THRESHOLD_SEC,
+        this.wasmResumeThresholdSec - 0.01,
+      );
+    } else {
+      this.wasmStartThresholdSec = Math.max(
+        MIN_WASM_START_THRESHOLD_SEC,
+        this.wasmStartThresholdSec - 0.01,
+      );
+      this.wasmResumeThresholdSec = Math.max(
+        MIN_WASM_RESUME_THRESHOLD_SEC,
+        this.wasmResumeThresholdSec - 0.005,
+      );
+    }
+    console.log("[Pocket TTS] engine: tuned thresholds", {
+      startSec: this.wasmStartThresholdSec,
+      resumeSec: this.wasmResumeThresholdSec,
+      rebuffers,
+      ttfaMs,
+    });
+  }
+
   feedSamples(samples: Float32Array): void {
     if (!this.workletNode) return;
-    const nonZero = samples.length > 0 ? Math.max(...Array.from(samples.slice(0, Math.min(samples.length, 10))).map(Math.abs)) : 0;
-    console.log("[Pocket TTS] feedSamples:", {
-      length: samples.length,
-      isFloat32Array: samples instanceof Float32Array,
-      maxAbsFirst10: nonZero,
-      min: samples.length > 0 ? Math.min(...Array.from(samples)) : 0,
-      max: samples.length > 0 ? Math.max(...Array.from(samples)) : 0,
-    });
-    // Clone rather than transfer: the chunk may have crossed extension
-    // message boundaries (which don't preserve transfer lists) and its
-    // underlying buffer may not be transferable in this context.
+    console.log("[Pocket TTS] feedSamples", { length: samples.length, postedAt: Date.now() });
+    // Clone rather than transfer: the chunk crossed extension message
+    // boundaries and its underlying buffer may not be transferable here.
     this.workletNode.port.postMessage({ type: "samples", samples });
   }
 
@@ -521,8 +584,19 @@ export class TTSEngine {
     await this.prepareVoice(voice);
     await this.ensureAudio();
     this.resetWorklet();
+    this.applyWasmThresholds();
+
+    this.rebufferCount = 0;
+    this.streamStartAt = performance.now();
+    this.firstAudioAt = null;
+
     this.updateStatus({ state: "buffering", message: null, error: null });
     await this.sendRpc({ kind: "start_stream", text: text.trim() });
+
+    const ttfaMs = this.firstAudioAt != null && this.streamStartAt != null
+      ? this.firstAudioAt - this.streamStartAt
+      : null;
+    this.tuneWasmThresholds(ttfaMs, this.rebufferCount);
   }
 
   stop(): void {
@@ -594,25 +668,30 @@ export class TTSEngine {
     }
 
     if (data.kind === "stream_chunk") {
+      const receivedAt = Date.now();
       const rawChunk = data.chunk;
       let chunk: Float32Array;
+      let decodeMs = 0;
       if (rawChunk instanceof Float32Array) {
         chunk = rawChunk;
       } else if (isSerializedFloat32Array(rawChunk)) {
+        const t0 = performance.now();
         chunk = deserializeFloat32Array(rawChunk);
+        decodeMs = performance.now() - t0;
       } else {
-        console.warn("[Pocket TTS] handleWorkerMessage stream_chunk: unexpected chunk type", {
+        console.warn("[Pocket TTS] unexpected chunk type", {
           chunkType: typeof rawChunk,
           chunkConstructor: (rawChunk as { constructor?: { name?: string } })?.constructor?.name,
         });
         return;
       }
-      console.log("[Pocket TTS] handleWorkerMessage stream_chunk", {
-        chunkLength: chunk.length,
-        isFloat32Array: chunk instanceof Float32Array,
-      });
       this.chunkListener?.(chunk);
       this.feedSamples(chunk);
+      console.log("[Pocket TTS] engine: chunk", {
+        receivedAt,
+        decodeMs: Math.round(decodeMs),
+        chunkLength: chunk.length,
+      });
       return;
     }
 

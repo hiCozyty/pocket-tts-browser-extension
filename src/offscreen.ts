@@ -11,10 +11,7 @@ type WorkerError = { kind: "worker_error"; portId: number; error: string };
 let worker: Worker | null = null;
 let activePortId: number | null = null;
 
-console.log("[Pocket TTS] offscreen: module loaded");
-
 const spawnWorker = (): Worker => {
-  console.log("[Pocket TTS] offscreen: spawning worker");
   let w: Worker;
   try {
     w = new WasmTtsWorker();
@@ -28,17 +25,16 @@ const spawnWorker = (): Worker => {
     const ev = e.data;
     let eventToSend: WasmWorkerEvent = ev;
     if (ev && typeof ev === "object" && "kind" in ev && ev.kind === "stream_chunk") {
-      const chunk = (ev as { chunk?: unknown }).chunk;
-      console.log("[Pocket TTS] offscreen: worker stream_chunk", {
-        chunkType: typeof chunk,
-        chunkConstructor: chunk?.constructor?.name,
-        chunkLength: (chunk as { length?: number } | undefined)?.length,
-        chunkByteLength: (chunk as { byteLength?: number } | undefined)?.byteLength,
+      const chunk = ev.chunk as Float32Array;
+      const receivedAt = Date.now();
+      eventToSend = { ...ev, chunk: serializeFloat32Array(chunk) } as WasmWorkerEvent;
+      console.log("[Pocket TTS] offscreen: chunk", {
+        receivedAt,
+        serializedAt: Date.now(),
+        chunkLength: chunk.length,
       });
-      eventToSend = { ...ev, chunk: serializeFloat32Array(ev.chunk as Float32Array) } as WasmWorkerEvent;
     }
     if (activePortId == null) {
-      console.warn("[Pocket TTS] offscreen: received worker event with no active port", e.data);
       return;
     }
     const payload: WorkerEvent = { kind: "worker_event", portId: activePortId, event: eventToSend };
@@ -91,11 +87,6 @@ chrome.runtime.onMessage.addListener((message: WasmRequest, _sender, _sendRespon
     return false;
   }
 
-  console.log("[Pocket TTS] offscreen: received wasm_request", {
-    portId: message.portId,
-    msgKind: message.msg?.kind,
-  });
-
   activePortId = message.portId;
   try {
     ensureWorker().postMessage(message.msg);
@@ -106,16 +97,10 @@ chrome.runtime.onMessage.addListener((message: WasmRequest, _sender, _sendRespon
   return false;
 });
 
-console.log("[Pocket TTS] offscreen: onMessage listener registered");
-
 ensureWorker();
-console.log("[Pocket TTS] offscreen: worker spawned");
 
 chrome.runtime
   .sendMessage({ kind: "offscreen_ready" })
-  .then(() => {
-    console.log("[Pocket TTS] offscreen: ready signal sent");
-  })
   .catch((err: unknown) => {
     const m = err instanceof Error ? err.message : String(err);
     console.warn("[Pocket TTS] offscreen: ready signal failed", m);

@@ -1,7 +1,5 @@
 /// <reference lib="webworker" />
 
-console.log("[Pocket TTS] worker: module loaded");
-
 import type {
   WasmLoadStatus,
   WasmWorkerEvent,
@@ -317,6 +315,14 @@ const handleStartStream = async (
     const computeMs = typeof stats.compute_ms === "number" ? stats.compute_ms : null;
     const mergedChunks = typeof stats.chunks_merged === "number" ? stats.chunks_merged : null;
 
+    const postedAt = Date.now();
+    console.log("[Pocket TTS] worker: chunk", {
+      postedAt,
+      chunkLength: chunk.length,
+      computeMs,
+      mergedChunks,
+    });
+
     postEvent(
       {
         kind: "stream_chunk",
@@ -348,8 +354,6 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
     return;
   }
 
-  console.log("[Pocket TTS] worker: onmessage", { kind: message.kind, requestId: (message as { requestId?: number }).requestId });
-
   if (message.kind === "stop") {
     stopRequested = true;
     activeStreamToken += 1;
@@ -359,11 +363,7 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
   void (async () => {
     try {
       if (message.kind === "init") {
-        console.log("[Pocket TTS] worker: handleInit, wasmBase =", (message as { wasmBase?: string }).wasmBase);
-        const modulePath = `${(message as { wasmBase: string }).wasmBase.replace(/\/+$/, "")}/pocket_tts.js`;
-        console.log("[Pocket TTS] worker: importing WASM from", modulePath);
         await handleInit(message);
-        console.log("[Pocket TTS] worker: handleInit complete");
         return;
       }
 

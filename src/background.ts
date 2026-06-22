@@ -7,7 +7,6 @@ const closeOffscreenDocument = async (): Promise<void> => {
   try {
     const has = await chrome.offscreen.hasDocument?.();
     if (has) {
-      console.log("[Pocket TTS] bg: closing stale offscreen document");
       await chrome.offscreen.closeDocument?.();
     }
   } catch (err) {
@@ -46,10 +45,8 @@ let offscreenReadyReceived = false;
 const ensureOffscreenDocument = async (): Promise<void> => {
   const has = await chrome.offscreen.hasDocument?.();
   if (has) {
-    console.log("[Pocket TTS] bg: offscreen document already exists");
     return;
   }
-  console.log("[Pocket TTS] bg: creating offscreen document");
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_URL,
     reasons: [chrome.offscreen.Reason.WORKERS],
@@ -62,11 +59,9 @@ const getOffscreenReady = (): Promise<void> => {
   offscreenReadyPromise = (async () => {
     await ensureOffscreenDocument();
     if (offscreenReadyReceived) return;
-    console.log("[Pocket TTS] bg: waiting for offscreen ready signal");
     await new Promise<void>((resolve) => {
       offscreenReadyResolver = resolve;
     });
-    console.log("[Pocket TTS] bg: offscreen ready");
   })();
   return offscreenReadyPromise;
 };
@@ -90,12 +85,20 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage) => {
   if (message.kind === "worker_event") {
     const ev = message.event;
     if (ev && typeof ev === "object" && "kind" in ev && ev.kind === "stream_chunk") {
-      const chunk = (ev as { chunk?: unknown }).chunk;
-      console.log("[Pocket TTS] bg: forwarding stream_chunk", {
-        chunkType: typeof chunk,
-        chunkConstructor: chunk?.constructor?.name,
-        chunkLength: (chunk as { length?: number } | undefined)?.length,
-      });
+      const chunk = (ev as { chunk?: { length?: number } }).chunk;
+      const receivedAt = Date.now();
+      try {
+        port.postMessage(ev);
+        console.log("[Pocket TTS] bg: chunk", {
+          receivedAt,
+          forwardedAt: Date.now(),
+          chunkLength: chunk?.length,
+        });
+      } catch (err) {
+        const m = err instanceof Error ? err.message : String(err);
+        console.error("[Pocket TTS] bg: port.postMessage failed", m);
+      }
+      return;
     }
   }
 
@@ -114,8 +117,6 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== PORT_NAME) return;
 
-  console.log("[Pocket TTS] bg: port connected");
-
   const portId = nextPortId++;
   ports.set(portId, port);
 
@@ -129,10 +130,6 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((msg) => {
     getOffscreenReady()
       .then(() => {
-        console.log("[Pocket TTS] bg: forwarding to offscreen", {
-          portId,
-          msgKind: (msg as { kind?: string })?.kind,
-        });
         sendToOffscreen(msg);
       })
       .catch((err) => {
@@ -145,7 +142,6 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 
   port.onDisconnect.addListener(() => {
-    console.log("[Pocket TTS] bg: port disconnected", portId);
     ports.delete(portId);
   });
 
