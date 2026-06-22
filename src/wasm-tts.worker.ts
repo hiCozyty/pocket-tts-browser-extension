@@ -79,6 +79,7 @@ interface WasmModelLike {
   start_stream(text: string): WasmStreamLike;
   load_voice_from_buffer(wavBytes: Uint8Array): void;
   load_voice_from_safetensors(bytes: Uint8Array): void;
+  load_voice_from_state_bytes(bytes: Uint8Array): void;
   readonly sample_rate: number;
 }
 
@@ -171,14 +172,14 @@ const fetchEmbedding = async (
   cache: CacheAdapter | null,
   useCache: boolean,
 ): Promise<Uint8Array> => {
-  const url = `https://huggingface.co/${hfRepo.trim()}/resolve/main/embeddings/${voice}.safetensors`;
+  const url = `https://huggingface.co/${hfRepo.trim()}/resolve/main/embeddings_v3/${voice}.safetensors`;
   const headers: Record<string, string> = {};
   if (hfToken.trim()) {
     headers.Authorization = `Bearer ${hfToken.trim()}`;
   }
 
   if (useCache && cache) {
-    return await cache.fetchWithCache(`voice:${voice}`, url);
+    return await cache.fetchWithCache(`voice:v3:${voice}`, url);
   }
 
   const res = await fetch(url, { headers });
@@ -280,7 +281,7 @@ const handlePrepareVoice = async (
 
   const cache: CacheAdapter | null = workerCache;
   const bytes = await fetchEmbedding(input.voice, input.hfRepo, input.hfToken, cache, true);
-  readyModel.load_voice_from_safetensors(bytes);
+  readyModel.load_voice_from_state_bytes(bytes);
   postOk(message.requestId);
 };
 

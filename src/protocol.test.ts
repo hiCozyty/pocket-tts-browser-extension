@@ -3,16 +3,29 @@ import { isPresetVoice, PRESET_VOICES, type PresetVoice } from "./protocol";
 
 describe("protocol", () => {
   describe("PRESET_VOICES", () => {
-    it("contains the expected 8 voices", () => {
+    it("contains the expected 21 voices", () => {
       expect(PRESET_VOICES).toEqual([
         "alba",
-        "marius",
-        "javert",
-        "jean",
-        "fantine",
+        "anna",
+        "azelma",
+        "bill_boerst",
+        "caro_davy",
+        "charles",
         "cosette",
         "eponine",
-        "azelma",
+        "eve",
+        "fantine",
+        "george",
+        "jane",
+        "javert",
+        "jean",
+        "marius",
+        "mary",
+        "michael",
+        "paul",
+        "peter_yearsley",
+        "stuart_bell",
+        "vera",
       ]);
     });
 

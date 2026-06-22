@@ -154,13 +154,26 @@ export interface RuntimeConfig {
 
 export const PRESET_VOICES = [
   "alba",
-  "marius",
-  "javert",
-  "jean",
-  "fantine",
+  "anna",
+  "azelma",
+  "bill_boerst",
+  "caro_davy",
+  "charles",
   "cosette",
   "eponine",
-  "azelma",
+  "eve",
+  "fantine",
+  "george",
+  "jane",
+  "javert",
+  "jean",
+  "marius",
+  "mary",
+  "michael",
+  "paul",
+  "peter_yearsley",
+  "stuart_bell",
+  "vera",
 ] as const;
 
 export type PresetVoice = (typeof PRESET_VOICES)[number];
