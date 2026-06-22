@@ -401,8 +401,8 @@ export class TTSEngine {
 
   private voiceSignature(voice: WasmWorkerVoiceInput): string {
     if (voice.kind === "preset") return `preset:${voice.voice}:${voice.hfRepo}`;
-    if (voice.kind === "wav") return `wav:${voice.wavBytes.byteLength}`;
-    return `emb:${voice.embeddingBytes.byteLength}`;
+    if (voice.kind === "wav") return `wav:${voice.wavB64.length}`;
+    return `emb:${voice.embeddingB64.length}`;
   }
 
   async ensureAudio(): Promise<{ sampleRate: number }> {

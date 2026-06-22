@@ -526,12 +526,17 @@ class FloatingUI {
     this.setMode("playing");
     
     try {
-      const voiceInput: WasmWorkerVoiceInput = {
-        kind: "preset",
-        voice: this.config.voice,
-        hfRepo: this.config.hfRepo,
-        hfToken: this.config.hfToken,
-      };
+      const voiceInput: WasmWorkerVoiceInput = (() => {
+        if (this.config.cloneWavB64) {
+          return { kind: "wav", wavB64: this.config.cloneWavB64 };
+        }
+        return {
+          kind: "preset",
+          voice: this.config.voice,
+          hfRepo: this.config.hfRepo,
+          hfToken: this.config.hfToken,
+        };
+      })();
 
       const generationPromise = this.engine.generate(text, voiceInput);
 
@@ -589,7 +594,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   wasmBase: (typeof chrome !== "undefined" && chrome.runtime?.getURL
     ? chrome.runtime.getURL("public/wasm")
     : "/public/wasm"),
-  hfRepo: "kyutai/pocket-tts-without-voice-cloning",
+  hfRepo: "kyutai/pocket-tts",
   hfToken: "",
   voice: "alba",
   useCache: true,
@@ -600,7 +605,20 @@ const loadConfig = async (): Promise<RuntimeConfig> => {
     const result = await chrome.storage.local.get(STORAGE_KEY);
     const stored = result[STORAGE_KEY] as Partial<RuntimeConfig> | undefined;
     if (stored) {
-      return { ...DEFAULT_CONFIG, ...stored };
+      let migrated = false;
+      if (stored.hfRepo && stored.hfRepo.includes("without-voice-cloning")) {
+        stored.hfRepo = "kyutai/pocket-tts";
+        migrated = true;
+      }
+      if (stored.useCache === false) {
+        stored.useCache = true;
+        migrated = true;
+      }
+      const next = { ...DEFAULT_CONFIG, ...stored, hfRepo: "kyutai/pocket-tts", useCache: true };
+      if (migrated) {
+        await chrome.storage.local.set({ [STORAGE_KEY]: next });
+      }
+      return next;
     }
   } catch (err) {
     console.warn("Pocket TTS: failed to load config", err);
@@ -713,6 +731,55 @@ const main = async (): Promise<void> => {
       ui.hide();
     }
   });
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.action !== "pickCloneWav") return;
+    handlePickCloneWav().then(sendResponse).catch(sendResponse);
+    return true;
+  });
+
+  const handlePickCloneWav = async (): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".wav";
+      input.style.display = "none";
+      document.body.appendChild(input);
+
+      input.addEventListener("change", async () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (!file) { resolve(null); return; }
+        try {
+          const b64 = await new Promise<string>((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const dataUrl = reader.result as string;
+              const b64 = dataUrl.split(",")[1];
+              res(b64);
+            };
+            reader.onerror = () => rej(reader.error);
+            reader.readAsDataURL(file);
+          });
+          const result = await chrome.storage.local.get(STORAGE_KEY);
+          const config = { ...DEFAULT_CONFIG, ...(result[STORAGE_KEY] || {}) };
+          config.cloneWavB64 = b64;
+          config.cloneWavName = file.name;
+          await chrome.storage.local.set({ [STORAGE_KEY]: config });
+          resolve(b64);
+        } catch (err) {
+          resolve(null);
+        }
+      });
+
+      input.addEventListener("cancel", () => {
+        input.remove();
+        resolve(null);
+      });
+
+      input.click();
+    });
+  };
 
   // Expose for the settings page
   (window as unknown as { pocketTtsExtension?: unknown }).pocketTtsExtension = {

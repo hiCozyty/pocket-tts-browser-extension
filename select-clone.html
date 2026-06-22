@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pocket TTS — Select Clone Voice</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #0b1020;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 32px;
+      text-align: center;
+      max-width: 360px;
+      width: 100%;
+    }
+    h1 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    p { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
+    .file-area {
+      border: 2px dashed #475569;
+      border-radius: 8px;
+      padding: 32px 16px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 16px;
+    }
+    .file-area:hover { border-color: #818cf8; background: rgba(129,140,248,0.05); }
+    .file-area.active { border-color: #818cf8; background: rgba(129,140,248,0.08); }
+    .file-area input { display: none; }
+    .icon { font-size: 36px; margin-bottom: 8px; }
+    .status { font-size: 12px; margin-top: 12px; min-height: 18px; }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #f87171; }
+    .file-name { font-size: 13px; color: #cbd5e1; word-break: break-all; }
+    .btn {
+      display: inline-block;
+      padding: 8px 16px;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      background: transparent;
+      color: #e2e8f0;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #334155; }
+    .btn.primary { background: #818cf8; border-color: #818cf8; color: #0b1020; }
+    .btn.primary:hover { background: #6366f1; }
+    .btn.danger { border-color: #f87171; color: #f87171; }
+    .btn.danger:hover { background: rgba(248,113,113,0.1); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Select Clone Voice</h1>
+    <p>Choose a 5-10s WAV sample to clone the speaker's voice.</p>
+
+    <label class="file-area" id="dropZone">
+      <div class="icon">&#x1F3A4;</div>
+      <div id="fileName">Click or drop a .wav file</div>
+      <input type="file" id="fileInput" accept=".wav" />
+    </label>
+
+    <div class="status" id="status"></div>
+
+    <div style="display: flex; gap: 8px; justify-content: center; margin-top: 12px;">
+      <button class="btn danger" id="clearBtn" disabled>Clear Clone</button>
+      <button class="btn" id="closeBtn">Close</button>
+    </div>
+  </div>
+
+  <script type="module">
+    (() => {
+      const STORAGE_KEY = "pocket_tts_config";
+      const fileInput = document.getElementById("fileInput");
+      const dropZone = document.getElementById("dropZone");
+      const fileName = document.getElementById("fileName");
+      const status = document.getElementById("status");
+      const clearBtn = document.getElementById("clearBtn");
+
+      const showStatus = (msg, cls) => {
+        status.textContent = msg;
+        status.className = "status " + (cls || "");
+      };
+
+      const loadConfig = async () => {
+        const result = await chrome.storage.local.get(STORAGE_KEY);
+        return result[STORAGE_KEY] || {};
+      };
+
+      const setCloneWavB64 = async (b64) => {
+        const config = await loadConfig();
+        config.cloneWavB64 = b64;
+        await chrome.storage.local.set({ [STORAGE_KEY]: config });
+      };
+
+      const clearClone = async () => {
+        const config = await loadConfig();
+        delete config.cloneWavB64;
+        await chrome.storage.local.set({ [STORAGE_KEY]: config });
+      };
+
+      (async () => {
+        const config = await loadConfig();
+        if (config.cloneWavB64) {
+          fileName.textContent = "Clone voice loaded ✓";
+          clearBtn.disabled = false;
+        }
+      })();
+
+      const processFile = async (file) => {
+        if (!file.name.endsWith(".wav")) {
+          showStatus("Please select a .wav file.", "err");
+          return;
+        }
+        showStatus("Processing…", "");
+        try {
+          const buf = await file.arrayBuffer();
+          if (buf.byteLength === 0) throw new Error("Empty file");
+          const bytes = new Uint8Array(buf);
+          const binary = String.fromCharCode(...bytes);
+          const b64 = btoa(binary);
+          await setCloneWavB64(b64);
+          fileName.textContent = file.name + " — Saved ✓";
+          showStatus("Voice clone saved! This tab can be closed.", "ok");
+          clearBtn.disabled = false;
+        } catch (err) {
+          showStatus("Failed: " + (err.message || "unknown error"), "err");
+        }
+      };
+
+      fileInput.addEventListener("change", (e) => {
+        const file = e.target.files?.[0];
+        if (file) processFile(file);
+      });
+
+      dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("active");
+      });
+      dropZone.addEventListener("dragleave", () => {
+        dropZone.classList.remove("active");
+      });
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("active");
+        const file = e.dataTransfer?.files?.[0];
+        if (file) processFile(file);
+      });
+
+      document.getElementById("closeBtn").addEventListener("click", () => {
+        window.close();
+      });
+
+      clearBtn.addEventListener("click", async () => {
+        await clearClone();
+        fileName.textContent = "Clone cleared ✓";
+        showStatus("Reverted to preset voice.", "ok");
+        clearBtn.disabled = true;
+      });
+    })();
+  </script>
+</body>
+</html>

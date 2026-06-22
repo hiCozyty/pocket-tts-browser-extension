@@ -27,7 +27,7 @@ flow_lm:
     dim: 1024
     n_bins: 4000
     tokenizer: sentencepiece
-    tokenizer_path: hf://kyutai/pocket-tts-without-voice-cloning/tokenizer.model@d4fdd22ae8c8e1cb3634e150ebeff1dab2d16df3
+    tokenizer_path: hf://kyutai/pocket-tts/tokenizer.model@d4fdd22ae8c8e1cb3634e150ebeff1dab2d16df3
 
 mimi:
   dtype: float32
@@ -80,6 +80,9 @@ interface WasmModelLike {
   load_voice_from_buffer(wavBytes: Uint8Array): void;
   load_voice_from_safetensors(bytes: Uint8Array): void;
   load_voice_from_state_bytes(bytes: Uint8Array): void;
+  set_no_chunking(): void;
+  dump_voice_state(): void;
+  get_dim_info(): Record<string, unknown>;
   readonly sample_rate: number;
 }
 
@@ -93,6 +96,7 @@ interface CacheAdapter {
     key: string,
     url: string,
     onProgress?: (loaded: number, total: number | null) => void,
+    headers?: Record<string, string>,
   ): Promise<Uint8Array>;
 }
 
@@ -152,7 +156,7 @@ const fetchWeights = async (
         ready: false,
         error: null,
       });
-    });
+    }, Object.keys(headers).length > 0 ? headers : undefined);
   }
 
   const response = await fetch(hfUrl, { headers });
@@ -179,7 +183,7 @@ const fetchEmbedding = async (
   }
 
   if (useCache && cache) {
-    return await cache.fetchWithCache(`voice:v3:${voice}`, url);
+    return await cache.fetchWithCache(`voice:v3:${voice}`, url, undefined, Object.keys(headers).length > 0 ? headers : undefined);
   }
 
   const res = await fetch(url, { headers });
@@ -264,13 +268,23 @@ const handlePrepareVoice = async (
   const input: WasmWorkerVoiceInput = message.voice;
 
   if (input.kind === "wav") {
-    readyModel.load_voice_from_buffer(input.wavBytes);
+    const binary = atob(input.wavB64);
+    const wavBytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      wavBytes[i] = binary.charCodeAt(i);
+    }
+    readyModel.load_voice_from_buffer(wavBytes);
     postOk(message.requestId);
     return;
   }
 
   if (input.kind === "embedding") {
-    readyModel.load_voice_from_safetensors(input.embeddingBytes);
+    const binary = atob(input.embeddingB64);
+    const embeddingBytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      embeddingBytes[i] = binary.charCodeAt(i);
+    }
+    readyModel.load_voice_from_safetensors(embeddingBytes);
     postOk(message.requestId);
     return;
   }

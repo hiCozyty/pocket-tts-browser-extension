@@ -8,7 +8,7 @@ const STORAGE_KEY = "pocket_tts_config";
 
 const DEFAULT_CONFIG: RuntimeConfig = {
   wasmBase: chrome.runtime.getURL("public/wasm"),
-  hfRepo: "kyutai/pocket-tts-without-voice-cloning",
+  hfRepo: "kyutai/pocket-tts",
   hfToken: "",
   voice: "alba",
   useCache: true,
@@ -135,7 +135,20 @@ const Popup = () => {
         const result = await chrome.storage.local.get(STORAGE_KEY);
         const stored = result[STORAGE_KEY] as Partial<RuntimeConfig> | undefined;
         if (stored) {
-          setConfig({ ...DEFAULT_CONFIG, ...stored });
+          let migrated = false;
+          if (stored.hfRepo && stored.hfRepo.includes("without-voice-cloning")) {
+            stored.hfRepo = "kyutai/pocket-tts";
+            migrated = true;
+          }
+          if (stored.useCache === false) {
+            stored.useCache = true;
+            migrated = true;
+          }
+          const next = { ...DEFAULT_CONFIG, ...stored, hfRepo: "kyutai/pocket-tts", useCache: true };
+          setConfig(next);
+          if (migrated) {
+            await chrome.storage.local.set({ [STORAGE_KEY]: next });
+          }
         }
       } catch (err) {
         console.warn("Failed to load config", err);
@@ -157,6 +170,16 @@ const Popup = () => {
 
       setLoading(false);
     })();
+
+    const onStorageChange = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName === "local" && changes[STORAGE_KEY]) {
+        setConfig({ ...DEFAULT_CONFIG, ...changes[STORAGE_KEY].newValue });
+      }
+    };
+    chrome.storage.onChanged.addListener(onStorageChange);
+    return () => {
+      chrome.storage.onChanged.removeListener(onStorageChange);
+    };
   }, []);
 
   const save = async (next: RuntimeConfig) => {
@@ -209,25 +232,51 @@ const Popup = () => {
           ))}
         </select>
         <p style={styles.help}>
-          Preset voices. Voice cloning from a WAV file is supported via the API
-          endpoint.
+          Preset voice to use when no clone WAV is provided.
         </p>
       </div>
 
       <div style={styles.section}>
-        <label style={styles.label}>HuggingFace Repository</label>
-        <input
-          style={styles.input}
-          value={config.hfRepo}
-          onChange={(e) => save({ ...config, hfRepo: e.target.value })}
-        />
-        <p style={styles.help}>
-          Repository to fetch model weights and voice embeddings from.
-        </p>
+        <label style={styles.label}>Clone Voice WAV (optional)</label>
+        <button
+          style={styles.button}
+          onClick={async () => {
+            try {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+              if (tab?.id) {
+                await chrome.tabs.sendMessage(tab.id, { action: "pickCloneWav" });
+              }
+            } catch {
+              // silently ignore — content script may not be loaded on this page
+            }
+          }}
+        >
+          Choose WAV file
+        </button>
+        {config.cloneWavB64 ? (
+          <div style={{ ...styles.row, marginTop: 6 }}>
+            <span style={styles.help}>{config.cloneWavName || "Clone loaded"}</span>
+            <button
+              style={{ ...styles.dangerButton, fontSize: 11, padding: "2px 8px" }}
+              onClick={() => {
+                const next = { ...config };
+                delete next.cloneWavB64;
+                delete next.cloneWavName;
+                void save(next);
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <p style={styles.help}>
+            Optional 5-10s WAV sample for voice cloning.
+          </p>
+        )}
       </div>
 
       <div style={styles.section}>
-        <label style={styles.label}>HuggingFace Token (optional)</label>
+        <label style={styles.label}>HuggingFace Token (required for voice cloning)</label>
         <input
           style={styles.input}
           type="password"
@@ -235,21 +284,9 @@ const Popup = () => {
           onChange={(e) => save({ ...config, hfToken: e.target.value })}
           placeholder="hf_…"
         />
-        <p style={styles.help}>Only required for private/gated repositories.</p>
-      </div>
-
-      <div style={styles.section}>
-        <label style={styles.checkboxRow}>
-          <input
-            type="checkbox"
-            checked={config.useCache}
-            onChange={(e) => save({ ...config, useCache: e.target.checked })}
-          />
-          Cache model weights in IndexedDB
-        </label>
         <p style={styles.help}>
-          When enabled, model weights are downloaded once and reused on
-          subsequent uses. Disable to force re-download.
+          Only needed if you use the Clone Voice feature. Without a token, preset
+          voices still work.
         </p>
       </div>
 

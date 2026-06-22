@@ -66,13 +66,14 @@ export const workerCache = {
     key: string,
     url: string,
     onProgress?: (loaded: number, total: number | null) => void,
+    headers?: Record<string, string>,
   ): Promise<Uint8Array> {
     const cached = await getCachedAsset(key);
     if (cached) {
       return cached.bytes;
     }
 
-    const response = await fetch(url);
+    const response = await fetch(url, headers ? { headers } : undefined);
     if (!response.ok) {
       throw new Error(`Failed to fetch ${url} (${response.status})`);
     }

@@ -61,11 +61,11 @@ export type WasmWorkerVoiceInput =
     }
   | {
       kind: "wav";
-      wavBytes: Uint8Array;
+      wavB64: string;
     }
   | {
       kind: "embedding";
-      embeddingBytes: Uint8Array;
+      embeddingB64: string;
     };
 
 export type WasmWorkerRequest =
@@ -150,6 +150,8 @@ export interface RuntimeConfig {
   hfToken: string;
   voice: string;
   useCache: boolean;
+  cloneWavB64?: string;
+  cloneWavName?: string;
 }
 
 export const PRESET_VOICES = [
