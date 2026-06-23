@@ -21,6 +21,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
     color: "#1f2937",
     background: "#fafafa",
+    borderRadius: 20,
+    overflow: "hidden",
   },
   header: {
     fontSize: 18,
@@ -57,7 +59,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     padding: "6px 8px",
     border: "1px solid #d1d5db",
-    borderRadius: 6,
+    borderRadius: 20,
     fontSize: 13,
     boxSizing: "border-box",
     background: "white",
@@ -285,8 +287,8 @@ const Popup = () => {
           placeholder="hf_…"
         />
         <p style={styles.help}>
-          Only needed if you use the Clone Voice feature. Without a token, preset
-          voices still work.
+          Only needed if you use the Clone Voice feature. You must accept the
+          terms of use for voice cloning models on HuggingFace to get a token.
         </p>
       </div>
 

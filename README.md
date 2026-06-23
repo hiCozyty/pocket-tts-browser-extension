@@ -5,17 +5,14 @@ neural text-to-speech model ([Pocket TTS](https://github.com/babybirdprd/pocket-
 
 No servers. No API keys. No data leaves your machine.
 
-> **Status:** functional scaffold. The extension UI, content script, WASM worker,
-> audio pipeline, and equalizer are wired up. You need to build the WASM binary
-> from pocket-tts and drop it in `public/wasm/`.
-
 ## Features
 
 - **Floating "Transcribe" button** appears next to your text selection
 - **Streaming audio playback** with a real-time frequency equalizer
 - **One-click Stop** button replaces the play button during playback
-- **Voice selector** with 8 preset voices (alba, marius, javert, jean, fantine, cosette, eponine, azelma)
-- **IndexedDB caching** of model weights — first run downloads ~500MB, subsequent runs are instant
+- **21 preset voices** (Alba, Anna, Azelma, Caro, Charles, Cosette, Eponine, Eve, Fantine, George, Jane, Javert, Jean, Marius, Mary, Michael, Paul, Peter, Vera, and more)
+- **Voice cloning** — upload a 5–10 second WAV sample and the model will clone the speaker's voice
+- **IndexedDB caching** of model weights and cloned voice states — first run downloads ~500MB, subsequent runs are instant
 - **Shadow DOM isolation** — the floating UI doesn't affect page styles
 - **Cross-browser** — Chrome (MV3) and Firefox (MV3-compatible manifest)
 
@@ -30,7 +27,7 @@ Content script (runs in every page)
       WASM TTS worker
         ├── Imports pocket_tts.js (wasm-bindgen)
         ├── Fetches model weights from HuggingFace (cached in IndexedDB)
-        ├── Fetches voice embedding (cached in IndexedDB)
+        ├── Loads preset voice embedding or clones from uploaded WAV
         └── Streams Float32Array audio chunks back to content script
 ```
 
@@ -50,9 +47,9 @@ The extension needs the compiled WASM artifacts from pocket-tts.
 # Clone the pocket-tts repo
 git clone https://github.com/babybirdprd/pocket-tts.git ../pocket-tts
 
-# Install Rust targets
+# Install Rust targets and wasm-pack
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli
+cargo install wasm-pack
 
 # Build the WASM module and copy it into the extension
 POCKET_TTS_DIR=../pocket-tts ./scripts/fetch-wasm.sh
@@ -61,6 +58,7 @@ POCKET_TTS_DIR=../pocket-tts ./scripts/fetch-wasm.sh
 This will produce:
 - `public/wasm/pocket_tts.js`
 - `public/wasm/pocket_tts_bg.wasm`
+- `public/wasm/pocket_tts.d.ts`
 
 ### 3. Build the extension
 
@@ -97,21 +95,23 @@ The built extension is in `dist/`.
 
 ## Usage
 
-1. Click the extension icon in your toolbar to open the settings popup
-2. Pick a voice and configure the HuggingFace repository (default: `kyutai/pocket-tts-without-voice-cloning`)
-3. Highlight any text on any webpage
-4. Click the floating "Transcribe" button that appears next to your selection
-5. The first time, the extension will download model weights (~500MB) and cache them
-6. Subsequent uses are instant
+1. Click the extension icon to open the settings popup
+2. Pick a preset voice, or upload a WAV file for voice cloning
+3. If using voice cloning, enter your HuggingFace token (required for gated model access)
+4. Highlight any text on any webpage
+5. Click the floating "Transcribe" button that appears next to your selection
+6. The first run downloads model weights (~500MB) and caches them; subsequent runs are instant
 
 ## Configuration
 
 | Setting | Default | Description |
 |---|---|---|
-| Voice | `alba` | One of the 8 preset voices |
-| HF Repository | `kyutai/pocket-tts-without-voice-cloning` | Where to fetch model weights and embeddings from |
-| HF Token | _(empty)_ | Required only for private/gated repos |
-| Cache | `enabled` | Cache model weights in IndexedDB |
+| Voice | `alba` | One of 21 preset voices |
+| Clone WAV | _(none)_ | Upload a 5–10s WAV to clone a custom voice |
+| HF Token | _(empty)_ | HuggingFace access token (required for voice cloning, optional for preset voices) |
+
+Model weights are fetched from `kyutai/pocket-tts` on HuggingFace.
+Caching is always enabled and assets are stored in IndexedDB.
 
 ## Development
 
