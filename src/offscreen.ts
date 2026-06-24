@@ -10,6 +10,19 @@ type WorkerError = { kind: "worker_error"; portId: number; error: string };
 
 let worker: Worker | null = null;
 let activePortId: number | null = null;
+let bgPort: chrome.runtime.Port | null = null;
+
+const sendToBackground = (payload: WorkerEvent | WorkerError): void => {
+  if (!bgPort) {
+    console.warn("[Pocket TTS] offscreen: no bgPort, dropping event");
+    return;
+  }
+  try {
+    bgPort.postMessage(payload);
+  } catch (err) {
+    console.error("[Pocket TTS] offscreen: bgPort.postMessage threw", err);
+  }
+};
 
 const spawnWorker = (): Worker => {
   let w: Worker;
@@ -23,27 +36,20 @@ const spawnWorker = (): Worker => {
 
   w.onmessage = (e: MessageEvent<WasmWorkerEvent>) => {
     const ev = e.data;
-            let eventToSend: WasmWorkerEvent = ev;
+    let eventToSend: WasmWorkerEvent = ev;
     if (ev && typeof ev === "object" && "kind" in ev && ev.kind === "stream_chunk") {
       const chunk = ev.chunk as Float32Array;
       eventToSend = { ...ev, chunk: serializeFloat32Array(chunk) } as WasmWorkerEvent;
-          }
+    }
     if (activePortId == null) {
       console.warn("[Pocket TTS] offscreen: dropping worker event, no activePortId", { eventKind: ev.kind });
       return;
     }
     const payload: WorkerEvent = { kind: "worker_event", portId: activePortId, event: eventToSend };
-    try {
-      chrome.runtime.sendMessage(payload).catch((err) => {
-        console.error("[Pocket TTS] offscreen: sendMessage failed", err);
-      });
-    } catch (err) {
-      console.error("[Pocket TTS] offscreen: sendMessage threw", err);
-    }
+    sendToBackground(payload);
   };
 
   w.onerror = (e: ErrorEvent) => {
-    console.error("[Pocket TTS] offscreen: worker onerror", { activePortId, message: e.message });
     const details = {
       message: e.message,
       filename: e.filename,
@@ -58,9 +64,7 @@ const spawnWorker = (): Worker => {
     console.error("[Pocket TTS] offscreen: worker error", summary, details);
     if (activePortId == null) return;
     const payload: WorkerError = { kind: "worker_error", portId: activePortId, error: summary };
-    try {
-      chrome.runtime.sendMessage(payload).catch(() => undefined);
-    } catch {}
+    sendToBackground(payload);
     worker = null;
   };
 
@@ -78,28 +82,32 @@ const ensureWorker = (): Worker => {
   return worker;
 };
 
-chrome.runtime.onMessage.addListener((message: WasmRequest, _sender, _sendResponse) => {
-  if (!message || message.kind !== "wasm_request") {
-    return false;
-  }
+const connectToBackground = (): void => {
+  try {
+    const port = chrome.runtime.connect({ name: "pocket-tts-offscreen" });
+    bgPort = port;
 
-  const prevPortId = activePortId;
-  activePortId = message.portId;
-  const msgKind = message.msg && typeof message.msg === "object" && "kind" in message.msg ? (message.msg as { kind: string }).kind : "unknown";
+    port.onMessage.addListener((wrapper: WasmRequest) => {
+      if (!wrapper || wrapper.kind !== "wasm_request") return;
+      activePortId = wrapper.portId;
       try {
-    ensureWorker().postMessage(message.msg);
+        ensureWorker().postMessage(wrapper.msg);
+      } catch (err) {
+        const m = err instanceof Error ? err.message : String(err);
+        console.error("[Pocket TTS] offscreen: postMessage to worker failed", m);
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      bgPort = null;
+      setTimeout(connectToBackground, 100);
+    });
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    console.error("[Pocket TTS] offscreen: postMessage failed", m);
+    console.error("[Pocket TTS] offscreen: connectToBackground failed", m);
+    setTimeout(connectToBackground, 1000);
   }
-  return false;
-});
+};
 
 ensureWorker();
-
-chrome.runtime
-  .sendMessage({ kind: "offscreen_ready" })
-  .catch((err: unknown) => {
-    const m = err instanceof Error ? err.message : String(err);
-    console.warn("[Pocket TTS] offscreen: ready signal failed", m);
-  });
+connectToBackground();

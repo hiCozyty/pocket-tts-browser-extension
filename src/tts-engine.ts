@@ -288,13 +288,15 @@ export class TTSEngine {
   init(config: RuntimeConfig, onStatus: StatusListener): void {
     this.config = config;
     this.statusListener = onStatus;
-    if (!this.worker) {
-      this.spawnWorker();
-    }
+    this.spawnWorker();
   }
 
   private spawnWorker(): void {
     if (this.worker) {
+      for (const { reject } of this.pending.values()) {
+        reject(new Error("Worker recreated"));
+      }
+      this.pending.clear();
       this.worker.terminate();
       this.worker = null;
     }
