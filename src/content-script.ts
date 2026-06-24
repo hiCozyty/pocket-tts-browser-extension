@@ -16,7 +16,6 @@ interface SelectionData {
 
 const HOST_ID = "pocket-tts-host";
 const MIN_CHARS = 1;
-const MAX_CHARS = 2000;
 const HIDE_DELAY_MS = 250;
 
 class FloatingUI {
@@ -658,10 +657,6 @@ const main = async (): Promise<void> => {
 
       const text = sel.toString().trim();
                   if (text.length < MIN_CHARS) {
-        ui.hide();
-        return;
-      }
-      if (text.length > MAX_CHARS) {
         ui.hide();
         return;
       }
