@@ -42,23 +42,28 @@ let offscreenReadyPromise: Promise<void> | null = null;
 let offscreenReadyResolver: (() => void) | null = null;
 let offscreenReadyReceived = false;
 
-const ensureOffscreenDocument = async (): Promise<void> => {
+const ensureOffscreenDocument = async (): Promise<boolean> => {
   const has = await chrome.offscreen.hasDocument?.();
   if (has) {
-    return;
+    return false;
   }
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_URL,
     reasons: [chrome.offscreen.Reason.WORKERS],
     justification: "Run pocket-tts WASM in a Web Worker for TTS inference",
   });
+  return true;
 };
 
 const getOffscreenReady = (): Promise<void> => {
   if (offscreenReadyPromise) return offscreenReadyPromise;
   offscreenReadyPromise = (async () => {
-    await ensureOffscreenDocument();
+    const created = await ensureOffscreenDocument();
     if (offscreenReadyReceived) return;
+    if (!created) {
+      offscreenReadyReceived = true;
+      return;
+    }
     await new Promise<void>((resolve) => {
       offscreenReadyResolver = resolve;
     });

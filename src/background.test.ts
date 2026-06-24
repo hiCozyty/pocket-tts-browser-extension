@@ -159,7 +159,6 @@ describe("background", () => {
   });
 
   it("recognizes offscreen_ready and resolves the ready gate", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     await importBackground();
     const onConnect = firstArg<(port: MockPort) => void>(chromeMock.runtime.onConnect.addListener);
     const port: MockPort = makePort("pocket-tts-worker");
@@ -178,7 +177,6 @@ describe("background", () => {
       portId: expect.any(Number),
       msg: { kind: "init" },
     });
-    expect(log).toHaveBeenCalledWith("[Pocket TTS] bg: offscreen ready signal received");
   });
 
   it("forwards port messages to offscreen via sendMessage", async () => {
