@@ -12,7 +12,7 @@ const closeOffscreenDocument = async (): Promise<void> => {
     }
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    console.warn("[Pocket TTS] bg: failed to close offscreen document", m);
+    console.warn("[PocketVoice] bg: failed to close offscreen document", m);
   }
 };
 
@@ -44,7 +44,7 @@ const ensureOffscreenDocument = async (): Promise<void> => {
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_URL,
     reasons: [chrome.offscreen.Reason.WORKERS],
-    justification: "Run pocket-tts WASM in a Web Worker for TTS inference",
+    justification: "Run PocketVoice WASM in a Web Worker for TTS inference",
   });
 };
 
@@ -70,14 +70,14 @@ chrome.runtime.onConnect.addListener((port) => {
       if (workerMsg.kind === "worker_event") {
         const targetPort = ports.get(workerMsg.portId);
         if (!targetPort) {
-          console.warn("[Pocket TTS] bg: no content port for worker_event", workerMsg.portId);
+          console.warn("[PocketVoice] bg: no content port for worker_event", workerMsg.portId);
           return;
         }
         try {
           targetPort.postMessage(workerMsg.event);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          console.error("[Pocket TTS] bg: port.postMessage failed (worker_event)", m);
+          console.error("[PocketVoice] bg: port.postMessage failed (worker_event)", m);
         }
       } else if (workerMsg.kind === "worker_error") {
         const targetPort = ports.get(workerMsg.portId);
@@ -86,7 +86,7 @@ chrome.runtime.onConnect.addListener((port) => {
           targetPort.postMessage({ kind: "stream_error", error: workerMsg.error ?? "Unknown worker error" });
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          console.error("[Pocket TTS] bg: port.postMessage failed (stream_error)", m);
+          console.error("[PocketVoice] bg: port.postMessage failed (stream_error)", m);
         }
       }
     });

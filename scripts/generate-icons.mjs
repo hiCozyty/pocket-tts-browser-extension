@@ -3,14 +3,25 @@
 // Uses the `pngjs` package — install it with `npm install --save-dev pngjs`.
 // Run with: node scripts/generate-icons.mjs
 
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 import { PNG } from "pngjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outDir = join(__dirname, "..", "public", "icons");
 mkdirSync(outDir, { recursive: true });
+
+const sourceIcon = join(outDir, "source-icon.png");
+if (existsSync(sourceIcon)) {
+  for (const size of [16, 32, 48, 128]) {
+    execSync(
+      `convert "${sourceIcon}" -gravity center -extent 928x928 -alpha on \\( +clone -alpha transparent -channel A -fill white -draw "circle 464,464 464,0" \\) -compose dst-in -composite -resize ${size}x${size} "${join(outDir, `icon-${size}.png`)}"`,
+    );
+  }
+  process.exit(0);
+}
 
 const drawIcon = (size) => {
   const png = new PNG({ width: size, height: size });

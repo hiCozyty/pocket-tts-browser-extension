@@ -1,7 +1,7 @@
 {
-  "name": "pocket-tts-browser-extension",
-  "version": "0.1.0",
-  "description": "Browser extension that transcribes highlighted text to speech using Pocket TTS (WASM, in-browser).",
+  "name": "pocketvoice-browser-extension",
+  "version": "1.0.0",
+  "description": "Browser extension that transcribes highlighted text to speech using PocketVoice (WASM, in-browser).",
   "type": "module",
   "private": true,
   "scripts": {

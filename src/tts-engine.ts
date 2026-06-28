@@ -216,7 +216,7 @@ class BackgroundWorkerProxy implements WorkerHandle {
         try {
           handler({ data: msg as WasmWorkerEvent } as MessageEvent<WasmWorkerEvent>);
         } catch (err) {
-          console.error("[Pocket TTS] proxy onmessage threw", err);
+          console.error("[PocketVoice] proxy onmessage threw", err);
         }
       }
     });
@@ -690,7 +690,7 @@ export class TTSEngine {
         chunk = deserializeFloat32Array(rawChunk);
         decodeMs = performance.now() - t0;
       } else {
-        console.warn("[Pocket TTS] unexpected chunk type", {
+        console.warn("[PocketVoice] unexpected chunk type", {
           chunkType: typeof rawChunk,
           chunkConstructor: (rawChunk as { constructor?: { name?: string } })?.constructor?.name,
         });

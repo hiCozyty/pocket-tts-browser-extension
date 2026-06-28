@@ -1,4 +1,4 @@
-# Pocket TTS Browser Extension
+# PocketVoice (Free TTS)
 
 Highlight any text on a webpage and have it spoken aloud by a local, in-browser
 neural text-to-speech model ([Pocket TTS](https://github.com/babybirdprd/pocket-tts)).
@@ -97,7 +97,7 @@ The built extension is in `dist/`.
 
 1. Click the extension icon to open the settings popup
 2. Pick a preset voice, or upload a WAV file for voice cloning
-3. If using voice cloning, enter your HuggingFace token (required for gated model access)
+3. Enter your HuggingFace token (free — required for gated model access)
 4. Highlight any text on any webpage
 5. Click the floating "Transcribe" button that appears next to your selection
 6. The first run downloads model weights (~500MB) and caches them; subsequent runs are instant
@@ -108,7 +108,7 @@ The built extension is in `dist/`.
 |---|---|---|
 | Voice | `alba` | One of 21 preset voices |
 | Clone WAV | _(none)_ | Upload a 5–10s WAV to clone a custom voice |
-| HF Token | _(empty)_ | HuggingFace access token (required for voice cloning, optional for preset voices) |
+| HF Token | _(empty)_ | Free HuggingFace token (required — get one at [hf.co/settings/tokens](https://huggingface.co/settings/tokens)) |
 
 Model weights are fetched from `kyutai/pocket-tts` on HuggingFace.
 Caching is always enabled and assets are stored in IndexedDB.

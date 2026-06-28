@@ -411,7 +411,7 @@ self.onmessage = (event: MessageEvent<WasmWorkerRequest>) => {
         return;
       }
     } catch (err) {
-      console.error("[Pocket TTS] worker: handler threw", err);
+      console.error("[PocketVoice] worker: handler threw", err);
       if (message.kind === "start_stream") {
         const text = err instanceof Error ? err.message : String(err);
                 postEvent({ kind: "stream_error", error: text });

@@ -465,7 +465,7 @@ class FloatingUI {
       this.equalizer = new EqualizerVisualizer(this.equalizerCanvas, analyser);
       this.equalizer.resize();
     } catch (err) {
-      console.error("Pocket TTS: failed to create equalizer", err);
+      console.error("PocketVoice: failed to create equalizer", err);
     }
   }
 
@@ -553,7 +553,7 @@ class FloatingUI {
             await generationPromise;
           } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[Pocket TTS] handleTranscribeClick: failed", msg, err);
+      console.error("[PocketVoice] handleTranscribeClick: failed", msg, err);
       this.hintText.textContent = msg.length > 30 ? msg.slice(0, 30) + "…" : msg;
       this.isPlaying = false;
       this.setMode("error");
@@ -578,7 +578,7 @@ class FloatingUI {
         await ext.saveConfig(this.config);
       }
     } catch (err) {
-      console.warn("Pocket TTS: failed to persist config", err);
+      console.warn("PocketVoice: failed to persist config", err);
     }
   }
 
@@ -620,7 +620,7 @@ const loadConfig = async (): Promise<RuntimeConfig> => {
       return next;
     }
   } catch (err) {
-    console.warn("Pocket TTS: failed to load config", err);
+    console.warn("PocketVoice: failed to load config", err);
   }
   return DEFAULT_CONFIG;
 };
@@ -675,7 +675,7 @@ const main = async (): Promise<void> => {
 
       ui.show({ text, rect });
     } catch (err) {
-      console.error("[Pocket TTS] selection handler crashed", err);
+      console.error("[PocketVoice] selection handler crashed", err);
     }
   };
 

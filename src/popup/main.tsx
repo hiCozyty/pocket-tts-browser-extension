@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { PRESET_VOICES, isPresetVoice } from "@/protocol";
 import type { RuntimeConfig } from "@/protocol";
@@ -19,9 +19,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: 320,
     padding: 16,
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-    color: "#1f2937",
-    background: "#fafafa",
-    borderRadius: 20,
+    color: "var(--foreground)",
+    background: "var(--background)",
+    borderRadius: "var(--radius)",
     overflow: "hidden",
   },
   header: {
@@ -32,7 +32,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   subheader: {
     fontSize: 12,
-    color: "#6b7280",
+    color: "var(--muted-foreground)",
     margin: 0,
     marginBottom: 16,
   },
@@ -43,13 +43,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: "block",
     fontSize: 12,
     fontWeight: 600,
-    color: "#374151",
+    color: "var(--foreground)",
     marginBottom: 4,
   },
   input: {
     width: "100%",
     padding: "6px 8px",
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--border)",
     borderRadius: 6,
     fontSize: 13,
     boxSizing: "border-box",
@@ -58,11 +58,12 @@ const styles: Record<string, React.CSSProperties> = {
   select: {
     width: "100%",
     padding: "6px 8px",
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--border)",
     borderRadius: 20,
     fontSize: 13,
     boxSizing: "border-box",
-    background: "white",
+    background: "var(--input)",
+    color: "var(--foreground)",
   },
   row: {
     display: "flex",
@@ -71,8 +72,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   button: {
     padding: "6px 12px",
-    background: "#8b5cf6",
-    color: "white",
+    background: "var(--primary)",
+    color: "var(--primary-foreground)",
     border: "none",
     borderRadius: 6,
     cursor: "pointer",
@@ -81,9 +82,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   dangerButton: {
     padding: "6px 12px",
-    background: "#fee2e2",
-    color: "#dc2626",
-    border: "1px solid #fecaca",
+    background: "var(--destructive)",
+    color: "var(--destructive-foreground)",
+    border: "none",
     borderRadius: 6,
     cursor: "pointer",
     fontSize: 13,
@@ -94,12 +95,12 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     padding: "4px 0",
     fontSize: 11,
-    color: "#6b7280",
-    borderBottom: "1px solid #f3f4f6",
+    color: "var(--muted-foreground)",
+    borderBottom: "1px solid var(--border)",
   },
   help: {
     fontSize: 11,
-    color: "#9ca3af",
+    color: "var(--muted-foreground)",
     marginTop: 4,
     lineHeight: 1.4,
   },
@@ -123,6 +124,77 @@ const formatBytes = (bytes: number): string => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
+const Select = ({ value, options, onChange, style }: {
+  value: string;
+  options: readonly string[];
+  onChange: (v: string) => void;
+  style?: React.CSSProperties;
+}) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position: "relative", ...style }}>
+      <div
+        style={{ ...styles.select, cursor: "pointer", userSelect: "none" }}
+        onClick={() => setOpen(!open)}
+      >
+        {value.charAt(0).toUpperCase() + value.slice(1)}
+        <span style={{ float: "right", fontSize: 10 }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && (
+        <div
+          className="dropdown-list"
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            marginTop: 2,
+            borderRadius: 6,
+            border: "1px solid var(--border)",
+            background: "var(--background)",
+            maxHeight: 180,
+            overflowY: "auto",
+          }}
+        >
+          {options.map((opt) => (
+            <div
+              key={opt}
+              style={{
+                padding: "6px 8px",
+                cursor: "pointer",
+                color: opt === value ? "var(--primary-foreground)" : "var(--foreground)",
+                background: opt === value ? "var(--primary)" : "transparent",
+              }}
+              onClick={() => { onChange(opt); setOpen(false); }}
+              onMouseEnter={(e) => {
+                if (opt !== value) e.currentTarget.style.background = "var(--muted)";
+              }}
+              onMouseLeave={(e) => {
+                if (opt !== value) e.currentTarget.style.background = "transparent";
+              }}
+            >
+              {opt.charAt(0).toUpperCase() + opt.slice(1)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const Popup = () => {
@@ -215,24 +287,19 @@ const Popup = () => {
 
   return (
     <div style={styles.root}>
-      <h1 style={styles.header}>Pocket TTS</h1>
+      <h1 style={styles.header}>PocketVoice</h1>
       <p style={styles.subheader}>
         Highlight text on any page and click the floating button to hear it.
       </p>
 
       <div style={styles.section}>
         <label style={styles.label}>Voice</label>
-        <select
-          style={styles.select}
+        <Select
           value={config.voice}
-          onChange={(e) => save({ ...config, voice: e.target.value })}
-        >
-          {PRESET_VOICES.map((v) => (
-            <option key={v} value={v}>
-              {v.charAt(0).toUpperCase() + v.slice(1)}
-            </option>
-          ))}
-        </select>
+          options={PRESET_VOICES}
+          onChange={(v) => save({ ...config, voice: v })}
+          style={styles.select}
+        />
         <p style={styles.help}>
           Preset voice to use when no clone WAV is provided.
         </p>
@@ -278,7 +345,7 @@ const Popup = () => {
       </div>
 
       <div style={styles.section}>
-        <label style={styles.label}>HuggingFace Token (required for voice cloning)</label>
+        <label style={styles.label}>HuggingFace Token (required)</label>
         <input
           style={styles.input}
           type="password"
@@ -287,8 +354,25 @@ const Popup = () => {
           placeholder="hf_…"
         />
         <p style={styles.help}>
-          Only needed if you use the Clone Voice feature. You must accept the
-          terms of use for voice cloning models on HuggingFace to get a token.
+          A free HuggingFace token is required to download model weights.
+          Get yours at{" "}
+            <a
+              href="https://huggingface.co/settings/tokens"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--primary)" }}
+          >
+            hf.co/settings/tokens
+          </a>{" "}
+          after accepting the terms at{" "}
+            <a
+              href="https://huggingface.co/kyutai/pocket-tts"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--primary)" }}
+          >
+            kyutai/pocket-tts
+          </a>.
         </p>
       </div>
 
@@ -313,10 +397,10 @@ const Popup = () => {
         )}
       </div>
 
-      {saved && <p style={{ ...styles.help, color: "#059669" }}>Saved.</p>}
+      {saved && <p style={{ ...styles.help, color: "var(--primary)" }}>Saved.</p>}
 
       {config.voice && !isPresetVoice(config.voice) && (
-        <p style={{ ...styles.help, color: "#dc2626" }}>
+        <p style={{ ...styles.help, color: "var(--destructive)" }}>
           Invalid voice selected. Please pick one of the presets.
         </p>
       )}
