@@ -345,7 +345,18 @@ const Popup = () => {
       </div>
 
       <div style={styles.section}>
-        <label style={styles.label}>HuggingFace Token (required)</label>
+        <label style={styles.label}>
+          HuggingFace Token (required)
+          <span style={{
+            display: "inline-block",
+            width: 10,
+            height: 10,
+            borderRadius: "50%",
+            marginLeft: 8,
+            verticalAlign: "middle",
+            backgroundColor: config.hfToken.trim() ? "#22c55e" : "#ef4444",
+          }} />
+        </label>
         <input
           style={styles.input}
           type="password"

@@ -585,6 +585,10 @@ class FloatingUI {
   setConfig(config: RuntimeConfig): void {
     this.config = config;
   }
+
+  public hasValidHfToken(): boolean {
+    return !!this.config?.hfToken?.trim();
+  }
 }
 
 const STORAGE_KEY = "pocket_tts_config";
@@ -669,6 +673,11 @@ const main = async (): Promise<void> => {
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) {
+        ui.hide();
+        return;
+      }
+
+      if (!ui.hasValidHfToken()) {
         ui.hide();
         return;
       }
